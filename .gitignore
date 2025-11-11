@@ -1,0 +1,74 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Tt]est[Rr]esults/
+artifacts/
+_Debug/
+_Release/
+
+# MSBuild logs
+msbuild.log
+msbuild.binlog
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+!packages/repositories.config
+.nuget/packages/
+
+# Auto-generated/Temp
+*.cache
+*.dbmdl
+*.bak
+*.log
+*.tlog
+*.tmp
+*.temp
+~$*
+*.swp
+
+# Rider/ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+
+# OS files
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.lnk
+
+# Publish profiles/outputs
+publish/
+*.pubxml
+*.publishsettings
+
+# Azure
+*.azurePubxml
+
+# Coverage
+*.coverage
+*.coveragexml
+coverage/
+
+# Git merge leftovers
+*.orig
+
+# IMK project specific: skip reference docs in this project folder
+# (this .gitignore is placed in ItemModKit/, so this only affects ItemModKit/docs)
+docs/
