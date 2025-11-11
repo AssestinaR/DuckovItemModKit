@@ -4,35 +4,27 @@ using System;
 namespace ItemModKit
 {
  /// <summary>
- /// IMK 入口脚本。加载后负责：初始化事件桥、生命周期落盘、可选启动 IMK Studio 调试窗口。
+ /// IMK 入口脚本。加载后负责：初始化事件桥、生命周期落盘。
+ /// 核心不再尝试启动任何 Samples 侧的 UI/工具。
  /// </summary>
  public class ModBehaviour : Duckov.Modding.ModBehaviour
  {
- /// <summary>IMK Studio 调试窗口的隐藏宿主对象（存在 Samples 才创建）。</summary>
- static GameObject s_Studio;
- /// <summary>保证尝试启动 Studio 逻辑只执行一次。</summary>
- static bool s_TriedLaunch;
-
  /// <summary>
- /// Unity Awake：初始化事件桥，尝试启动 IMK Studio。
+ /// Unity Awake：初始化事件桥。
  /// </summary>
  void Awake()
  {
  // 初始化事件桥
  try { Adapters.Duckov.DuckovEventBridge.Initialize(); } catch { }
- // 启动 Studio（若存在 Samples 包）
- TryLaunchStudio();
  }
 
  /// <summary>
- /// Unity OnDestroy：场景卸载时落盘并释放事件桥，清理 Studio。
+ /// Unity OnDestroy：场景卸载时落盘并释放事件桥。
  /// </summary>
  void OnDestroy()
  {
  try { Adapters.Duckov.IMKDuckov.FlushAllDirty("scene unload"); } catch { }
  try { Adapters.Duckov.DuckovEventBridge.Dispose(); } catch { }
- // 清理 Studio
- try { if (s_Studio != null) { GameObject.Destroy(s_Studio); s_Studio = null; } } catch { }
  }
 
  /// <summary>
@@ -67,46 +59,6 @@ namespace ItemModKit
  }
  }
  catch { }
- }
-
- /// <summary>
- /// 尝试创建 IMK Studio 主窗口：仅当 Samples 中类型可解析且当前场景没有已有实例。
- /// </summary>
- private static void TryLaunchStudio()
- {
-     if (s_TriedLaunch) return; s_TriedLaunch = true;
-     try
-     {
-         var t = Type.GetType("ItemModKit.Samples.UI.Window.MainWindow")
-                 ?? FindTypeInLoadedAssemblies("ItemModKit.Samples.UI.Window.MainWindow");
-         if (t == null) return;
-         var existing = UnityEngine.Object.FindObjectsOfType(t);
-         if (existing != null && existing.Length > 0) return;
-         s_Studio = new GameObject("IMK Studio");
-         s_Studio.hideFlags = HideFlags.HideAndDontSave;
-         s_Studio.AddComponent(t);
-     }
-     catch { }
- }
-
- /// <summary>
- /// 在已加载的所有程序集里按完整类型名查找。
- /// </summary>
- /// <param name="typeName">完整类型名，例如 Namespace.Type。</param>
- /// <returns>找到的类型，或 null。</returns>
- private static Type FindTypeInLoadedAssemblies(string typeName)
- {
-     try
-     {
-         var asms = AppDomain.CurrentDomain.GetAssemblies();
-         for (int i = 0; i < asms.Length; i++)
-         {
-             var tt = asms[i].GetType(typeName, false);
-             if (tt != null) return tt;
-         }
-     }
-     catch { }
-     return null;
  }
  }
 }
