@@ -6,16 +6,16 @@ using ItemModKit.Core;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// 克隆管线：支持两种克隆策略并尝试放入背包。
-    /// - TreeData 策略：通过树数据服务重建完整子树（保真度更高）
-    /// - Unity 策略：直接克隆 GameObject 并取同类型组件（简单快速）
-    /// 可选变量合并/拷贝标签与 UI 刷新，返回诊断信息。
+    /// 克隆管线：支持 TreeData 与 Unity 两种克隆策略，随后可按需合并变量/复制标签并尝试放入背包。
     /// </summary>
     internal sealed class DuckovClonePipeline : IClonePipeline
     {
         /// <summary>
-        /// 从源物品克隆一个副本，按策略选择克隆方式，并尝试放入解析到的目标背包。
+        /// 从源物品克隆一个副本，按策略完成克隆并尝试放入目标背包。
         /// </summary>
+        /// <param name="source">源物品。</param>
+        /// <param name="options">管线选项（可为 null）。</param>
+        /// <returns>包含新物品、放置情况与诊断信息的结果。</returns>
         public RichResult<ClonePipelineResult> TryCloneToInventory(object source, ClonePipelineOptions options = null)
         {
             options = options ?? new ClonePipelineOptions();
@@ -85,13 +85,13 @@ namespace ItemModKit.Adapters.Duckov
                 try
                 {
                     var tLM = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.LevelManager") ?? DuckovTypeUtils.FindType("LevelManager");
-                    var pInst = tLM?.GetProperty("Instance", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                    var pInst = tLM?.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                     var lm = pInst?.GetValue(null, null);
-                    var pMain = lm?.GetType().GetProperty("MainCharacter", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var pMain = lm?.GetType().GetProperty("MainCharacter", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var main = pMain?.GetValue(lm, null);
-                    var pCharItem = main?.GetType().GetProperty("CharacterItem", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var pCharItem = main?.GetType().GetProperty("CharacterItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var chItem = pCharItem?.GetValue(main, null);
-                    var pInv = chItem?.GetType().GetProperty("Inventory", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var pInv = chItem?.GetType().GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var inv2 = pInv?.GetValue(chItem, null);
                     if (inv2 != null) return inv2;
                 }
@@ -102,7 +102,7 @@ namespace ItemModKit.Adapters.Duckov
                 try
                 {
                     var tPS = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.PlayerStorage") ?? DuckovTypeUtils.FindType("PlayerStorage");
-                    var pInv = tPS?.GetProperty("Inventory", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                    var pInv = tPS?.GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                     var inv = pInv?.GetValue(null, null);
                     if (inv != null) return inv;
                 }
@@ -123,13 +123,13 @@ namespace ItemModKit.Adapters.Duckov
         }
         private static void TryRefreshInventory(object inv)
         {
-            try { var p = inv.GetType().GetProperty(EngineKeys.Property.NeedInspection, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance); p?.SetValue(inv, true, null); } catch { }
-            try { var m = inv.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance); m?.Invoke(inv, null); } catch { }
+            try { var p = inv.GetType().GetProperty(EngineKeys.Property.NeedInspection, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); p?.SetValue(inv, true, null); } catch { }
+            try { var m = inv.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); m?.Invoke(inv, null); } catch { }
         }
         private sealed class DeferredInvoker : UnityEngine.MonoBehaviour
         {
-            private Action _a; public void Init(Action a){ _a=a; }
-            private System.Collections.IEnumerator Start(){ yield return null; try{ _a?.Invoke(); }catch{} try{ UnityEngine.Object.DestroyImmediate(gameObject); }catch{} }
+            private Action _a; public void Init(Action a) { _a = a; }
+            private System.Collections.IEnumerator Start() { yield return null; try { _a?.Invoke(); } catch { } try { UnityEngine.Object.DestroyImmediate(gameObject); } catch { } }
         }
     }
 }

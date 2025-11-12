@@ -4,40 +4,60 @@ using System.Collections.Generic;
 namespace ItemModKit.Core
 {
     /// <summary>
-    /// 克隆选项：控制哪些域从源复制到目标。
-    /// Core: 名称/品质/显示品质/价值；可选 TypeId
-    /// Variables/Constants/Tags: 对应集合
-    /// CloneAffixes: 快捷启用 Stats + Modifiers
-    /// Stats/Modifiers: 细粒度控制（可与 CloneAffixes 组合）
+    /// 克隆选项：控制从源物品复制到目标物品的各域行为。
     /// </summary>
     public sealed class CloneOptions
     {
-        public bool Core = true;              // Name/Value/Quality/DisplayQuality/TypeId (TypeId optional)
-        public bool IncludeTypeId = false;    // Usually false to keep target type
+        /// <summary>是否复制核心字段 (Name/RawName/Quality/DisplayQuality/Value/TypeId)。</summary>
+        public bool Core = true;
+        /// <summary>是否包含 TypeId（通常为 false，以保留目标原类型）。</summary>
+        public bool IncludeTypeId = false;
+        /// <summary>是否复制变量集合。</summary>
         public bool Variables = true;
+        /// <summary>是否复制常量集合。</summary>
         public bool Constants = true;
+        /// <summary>是否复制标签集合。</summary>
         public bool Tags = true;
-        public bool CloneAffixes = false;     // when true, will try to clone Stats + Modifiers
-        public bool Stats = false;            // fine-grained control; effective if CloneAffixes or explicitly true
-        public bool Modifiers = false;        // fine-grained control; effective if CloneAffixes or explicitly true
+        /// <summary>快捷启用 Stats + Modifiers 的聚合标记。</summary>
+        public bool CloneAffixes = false;
+        /// <summary>是否复制统计 (Stats)；可与 CloneAffixes 组合。</summary>
+        public bool Stats = false;
+        /// <summary>是否复制修饰 (Modifiers)；可与 CloneAffixes 组合。</summary>
+        public bool Modifiers = false;
     }
 
     /// <summary>
-    /// 克隆器：提供从模板复制到目标物品的多域复制逻辑。
-    /// 支持基础域、变量/常量/标签以及可选的 Stat 与 Modifier。
+    /// 克隆器：提供从模板源复制多域到目标物品的逻辑，支持扩展域（Stats/Modifiers）。
     /// </summary>
     public static class Cloner
     {
-        /// <summary>基础克隆（不含 affix）。</summary>
+        /// <summary>
+        /// 基础克隆（不含统计与修饰）。
+        /// </summary>
+        /// <param name="adapter">物品适配器。</param>
+        /// <param name="writer">写入服务。</param>
+        /// <param name="source">源物品。</param>
+        /// <param name="target">目标物品。</param>
+        /// <param name="options">克隆选项（可 null 使用默认）。</param>
+        /// <returns>操作结果。</returns>
         public static RichResult CloneFromTemplate(IItemAdapter adapter, IWriteService writer, object source, object target, CloneOptions options = null)
         {
             return CloneFromTemplate(adapter, writer, reader: null, source: source, target: target, options: options);
         }
 
-        /// <summary>扩展克隆：若提供 reader 可复制 Stat 与 Modifier（含描述）。</summary>
+        /// <summary>
+        /// 扩展克隆：在提供 reader 时可复制 Stats 与 Modifier 描述。
+        /// </summary>
+        /// <param name="adapter">物品适配器。</param>
+        /// <param name="writer">写入服务。</param>
+        /// <param name="reader">读取服务（用于 Stats/Modifiers 描述）。</param>
+        /// <param name="source">源物品。</param>
+        /// <param name="target">目标物品。</param>
+        /// <param name="options">克隆选项。</param>
+        /// <returns>结果（成功或错误码）。</returns>
         public static RichResult CloneFromTemplate(IItemAdapter adapter, IWriteService writer, IReadService reader, object source, object target, CloneOptions options = null)
         {
-            if (adapter == null || writer == null || source == null || target == null)
+            if (AdapterOrArgsInvalid(adapter, writer, source, target))
                 return RichResult.Fail(ErrorCode.InvalidArgument, "null args");
             options = options ?? new CloneOptions();
 
@@ -156,6 +176,12 @@ namespace ItemModKit.Core
                 Log.Error("CloneFromTemplate failed", ex);
                 return RichResult.Fail(ErrorCode.OperationFailed, ex.Message);
             }
+        }
+
+        /// <summary>检查适配器或输入对象是否为 null。</summary>
+        private static bool AdapterOrArgsInvalid(IItemAdapter adapter, IWriteService writer, object source, object target)
+        {
+            return adapter == null || writer == null || source == null || target == null;
         }
     }
 }

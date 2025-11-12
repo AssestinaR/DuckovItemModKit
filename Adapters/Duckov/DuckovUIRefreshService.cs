@@ -11,6 +11,8 @@ namespace ItemModKit.Adapters.Duckov
         /// <summary>
         /// 刷新背包 UI。
         /// </summary>
+        /// <param name="inventory">目标背包对象。</param>
+        /// <param name="markNeedInspection">是否设置 NeedInspection 为 true。</param>
         public void RefreshInventory(object inventory, bool markNeedInspection = true)
         {
             if (inventory == null) return;
@@ -18,14 +20,14 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (markNeedInspection)
                 {
-                    var p = inventory.GetType().GetProperty(EngineKeys.Property.NeedInspection, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var p = inventory.GetType().GetProperty(EngineKeys.Property.NeedInspection, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     p?.SetValue(inventory, true, null);
                 }
             }
             catch { }
             try
             {
-                var m = inventory.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var m = inventory.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 m?.Invoke(inventory, null);
             }
             catch { }

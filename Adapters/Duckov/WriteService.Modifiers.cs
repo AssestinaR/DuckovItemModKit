@@ -109,16 +109,16 @@ namespace ItemModKit.Adapters.Duckov
                         {
                             try
                             {
-                                var statsObj = DuckovReflectionCache.GetGetter(item.GetType(), "Stats", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item); object stat = null;
-                                var indexer = DuckovReflectionCache.GetMethod(statsObj?.GetType(), "get_Item", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ typeof(string) }); if (indexer != null) stat = indexer.Invoke(statsObj, new object[]{ statKey });
+                                var statsObj = DuckovReflectionCache.GetGetter(item.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item); object stat = null;
+                                var indexer = DuckovReflectionCache.GetMethod(statsObj?.GetType(), "get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) }); if (indexer != null) stat = indexer.Invoke(statsObj, new object[] { statKey });
                                 if (stat == null)
                                 {
-                                    var getStat = DuckovReflectionCache.GetMethod(statsObj?.GetType(), "GetStat", BindingFlags.Public|BindingFlags.NonPublic | BindingFlags.Instance, new[]{ typeof(string) }); if (getStat != null) stat = getStat.Invoke(statsObj, new object[]{ statKey });
+                                    var getStat = DuckovReflectionCache.GetMethod(statsObj?.GetType(), "GetStat", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) }); if (getStat != null) stat = getStat.Invoke(statsObj, new object[] { statKey });
                                 }
                                 if (stat != null)
                                 {
-                                    var statAdd = DuckovReflectionCache.GetMethod(stat.GetType(), "AddModifier", BindingFlags.Public|BindingFlags.NonPublic | BindingFlags.Instance, new[]{ sig.modifierType })
-                                                 ?? DuckovReflectionCache.GetMethod(stat.GetType(), "AddModifier", BindingFlags.Public|BindingFlags.NonPublic | BindingFlags.Instance);
+                                    var statAdd = DuckovReflectionCache.GetMethod(stat.GetType(), "AddModifier", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { sig.modifierType })
+                                                 ?? DuckovReflectionCache.GetMethod(stat.GetType(), "AddModifier", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                                     if (statAdd != null) { statAdd.Invoke(stat, new object[] { mod }); applied = true; }
                                 }
                             }
@@ -136,16 +136,16 @@ namespace ItemModKit.Adapters.Duckov
                             Type descType = modsCol.GetType().GetGenericArguments().FirstOrDefault() ?? DuckovTypeUtils.FindType("ItemStatsSystem.ModifierDescription");
                             if (descType != null)
                             {
-                                var inst = Activator.CreateInstance(descType); DuckovReflectionCache.GetSetter(descType, "Key", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, statKey);
+                                var inst = Activator.CreateInstance(descType); DuckovReflectionCache.GetSetter(descType, "Key", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, statKey);
                                 if (sig.enumType != null)
                                 {
-                                    try { var names = DuckovReflectionCache.GetEnumNames(sig.enumType); string mapped = MapModifierEnumName(type, names); var e = Enum.Parse(sig.enumType, mapped); DuckovReflectionCache.GetSetter(descType, "Type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, e); } catch { }
+                                    try { var names = DuckovReflectionCache.GetEnumNames(sig.enumType); string mapped = MapModifierEnumName(type, names); var e = Enum.Parse(sig.enumType, mapped); DuckovReflectionCache.GetSetter(descType, "Type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, e); } catch { }
                                 }
-                                DuckovReflectionCache.GetSetter(descType, "Value", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, value);
-                                var addDesc = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ descType })
-                                              ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                                DuckovReflectionCache.GetSetter(descType, "Value", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, value);
+                                var addDesc = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { descType })
+                                              ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                                 addDesc?.Invoke(modsCol, new[] { inst });
-                                var reapplyCol = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance); reapplyCol?.Invoke(modsCol, null); applied = true;
+                                var reapplyCol = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); reapplyCol?.Invoke(modsCol, null); applied = true;
                             }
                         }
                     }
@@ -184,7 +184,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null"); bool statsIsNull = false;
-                try { var p = item.GetType().GetProperty("Stats", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance); var stats = p?.GetValue(item, null); statsIsNull = stats == null; } catch { }
+                try { var p = item.GetType().GetProperty("Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); var stats = p?.GetValue(item, null); statsIsNull = stats == null; } catch { }
                 if (statsIsNull) return RichResult.Success(); _item.ReapplyModifiers(item); return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryReapplyModifiers failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
@@ -197,37 +197,37 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 var descType = modsCol.GetType().GetGenericArguments().FirstOrDefault() ?? DuckovTypeUtils.FindType("ItemStatsSystem.ModifierDescription");
                 if (descType == null) return RichResult.Fail(ErrorCode.NotSupported, "ModifierDescription type missing");
                 if (string.IsNullOrEmpty(key)) return RichResult.Fail(ErrorCode.InvalidArgument, "key is empty");
                 var inst = Activator.CreateInstance(descType);
-                try { DuckovReflectionCache.GetSetter(descType, "Key", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, key); } catch { }
+                try { DuckovReflectionCache.GetSetter(descType, "Key", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, key); } catch { }
                 if (!string.IsNullOrEmpty(type))
                 {
                     try
                     {
-                        var typeProp = descType.GetProperty("Type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                        var typeProp = descType.GetProperty("Type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         var enumType = typeProp?.PropertyType;
                         if (enumType != null)
                         {
                             var names = DuckovReflectionCache.GetEnumNames(enumType);
                             var mapped = MapModifierEnumName(type, names);
                             var e = Enum.Parse(enumType, mapped);
-                            DuckovReflectionCache.GetSetter(descType, "Type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, e);
+                            DuckovReflectionCache.GetSetter(descType, "Type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, e);
                         }
                     }
                     catch { }
                 }
-                try { DuckovReflectionCache.GetSetter(descType, "Value", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, value); } catch { }
-                if (order.HasValue) { try { DuckovReflectionCache.GetSetter(descType, "Order", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, order.Value); } catch { } }
-                if (display.HasValue) { try { DuckovReflectionCache.GetSetter(descType, "Display", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, display.Value); } catch { } }
-                if (!string.IsNullOrEmpty(target)) { try { DuckovReflectionCache.GetSetter(descType, "Target", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(inst, target); } catch { } }
-                var add = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ descType })
-                          ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                add?.Invoke(modsCol, new[]{ inst });
-                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                try { DuckovReflectionCache.GetSetter(descType, "Value", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, value); } catch { }
+                if (order.HasValue) { try { DuckovReflectionCache.GetSetter(descType, "Order", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, order.Value); } catch { } }
+                if (display.HasValue) { try { DuckovReflectionCache.GetSetter(descType, "Display", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, display.Value); } catch { } }
+                if (!string.IsNullOrEmpty(target)) { try { DuckovReflectionCache.GetSetter(descType, "Target", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, target); } catch { } }
+                var add = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { descType })
+                          ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                add?.Invoke(modsCol, new[] { inst });
+                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 reapply?.Invoke(modsCol, null);
                 TryReapplyModifiers(item);
                 return RichResult.Success();
@@ -240,7 +240,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 object targetDesc = null;
                 var en = modsCol as System.Collections.IEnumerable;
@@ -249,15 +249,15 @@ namespace ItemModKit.Adapters.Duckov
                     foreach (var d in en)
                     {
                         if (d == null) continue;
-                        var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"}));
+                        var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" }));
                         if (string.Equals(k, key, StringComparison.Ordinal)) { targetDesc = d; break; }
                     }
                 }
                 if (targetDesc == null) return RichResult.Fail(ErrorCode.NotFound, "description not found");
-                var remove = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Remove", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ targetDesc.GetType() })
-                              ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Remove", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                remove?.Invoke(modsCol, new[]{ targetDesc });
-                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var remove = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { targetDesc.GetType() })
+                              ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                remove?.Invoke(modsCol, new[] { targetDesc });
+                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 reapply?.Invoke(modsCol, null);
                 TryReapplyModifiers(item);
                 return RichResult.Success();
@@ -270,17 +270,17 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 foreach (var d in modsCol)
                 {
-                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"})); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
-                    var setter = DuckovReflectionCache.GetSetter(d.GetType(), "Value", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" })); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
+                    var setter = DuckovReflectionCache.GetSetter(d.GetType(), "Value", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     setter?.Invoke(d, value);
-                    var reapply = DuckovReflectionCache.GetMethod(d.GetType().DeclaringType ?? d.GetType(), "ReapplyModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var reapply = DuckovReflectionCache.GetMethod(d.GetType().DeclaringType ?? d.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     // fallback: on collection
-                    var modsColObj = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
-                    if (reapply == null) reapply = DuckovReflectionCache.GetMethod(modsColObj?.GetType(), "ReapplyModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var modsColObj = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                    if (reapply == null) reapply = DuckovReflectionCache.GetMethod(modsColObj?.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     reapply?.Invoke(modsColObj, null);
                     TryReapplyModifiers(item);
                     return RichResult.Success();
@@ -295,19 +295,19 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 foreach (var d in modsCol)
                 {
                     if (d == null) continue;
-                    var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"}));
+                    var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" }));
                     if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
                     Type enumType = null;
-                    var tp = d.GetType().GetProperty("Type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var tp = d.GetType().GetProperty("Type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (tp != null) enumType = tp.PropertyType;
                     if (enumType == null)
                     {
-                        var tf = d.GetType().GetField("type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                        var tf = d.GetType().GetField("type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (tf != null) enumType = tf.FieldType;
                     }
                     if (enumType == null) return RichResult.Fail(ErrorCode.NotSupported, "Enum type not found on description");
@@ -322,11 +322,11 @@ namespace ItemModKit.Adapters.Duckov
                     bool setOk = false;
                     try
                     {
-                        var setter = DuckovReflectionCache.GetSetter(d.GetType(), "Type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                        var setter = DuckovReflectionCache.GetSetter(d.GetType(), "Type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (setter != null) { setter.Invoke(d, enumVal); setOk = true; }
                         else
                         {
-                            var fld = DuckovReflectionCache.GetField(d.GetType(), "type", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                            var fld = DuckovReflectionCache.GetField(d.GetType(), "type", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                             if (fld != null) { fld.SetValue(d, enumVal); setOk = true; }
                         }
                     }
@@ -345,12 +345,12 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 foreach (var d in modsCol)
                 {
-                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"})); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
-                    DuckovReflectionCache.GetSetter(d.GetType(), "Order", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(d, order);
+                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" })); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
+                    DuckovReflectionCache.GetSetter(d.GetType(), "Order", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(d, order);
                     TryReapplyModifiers(item);
                     return RichResult.Success();
                 }
@@ -364,12 +364,12 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
                 foreach (var d in modsCol)
                 {
-                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"})); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
-                    DuckovReflectionCache.GetSetter(d.GetType(), "Display", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(d, display);
+                    if (d == null) continue; var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" })); if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
+                    DuckovReflectionCache.GetSetter(d.GetType(), "Display", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(d, display);
                     TryReapplyModifiers(item);
                     return RichResult.Success();
                 }
@@ -383,10 +383,10 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
+                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
-                var clear = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Clear", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)
-                            ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "ClearModifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var clear = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Clear", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                            ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "ClearModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 clear?.Invoke(modsCol, null);
                 TryReapplyModifiers(item);
                 return RichResult.Success();
@@ -399,21 +399,21 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsColObj = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
+                var modsColObj = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
                 var modsCol = modsColObj as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
-                var remove = DuckovReflectionCache.GetMethod(modsColObj.GetType(), "Remove", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)
-                             ?? DuckovReflectionCache.GetMethod(modsColObj.GetType(), "RemoveModifier", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var remove = DuckovReflectionCache.GetMethod(modsColObj.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                             ?? DuckovReflectionCache.GetMethod(modsColObj.GetType(), "RemoveModifier", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 var toRemove = new List<object>();
                 foreach (var d in modsCol)
                 {
                     if (d == null) continue;
-                    var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[]{"Key","key"}));
+                    var k = Convert.ToString(DuckovTypeUtils.GetMaybe(d, new[] { "Key", "key" }));
                     if (string.IsNullOrEmpty(k)) toRemove.Add(d);
                 }
                 foreach (var d in toRemove)
                 {
-                    try { remove?.Invoke(modsColObj, new[]{ d }); } catch { }
+                    try { remove?.Invoke(modsColObj, new[] { d }); } catch { }
                 }
                 TryReapplyModifiers(item);
                 return RichResult.Success();
@@ -430,19 +430,19 @@ namespace ItemModKit.Adapters.Duckov
                 if (item == null || string.IsNullOrEmpty(effectTypeFullName)) return RichResult.Fail(ErrorCode.InvalidArgument, "args");
                 var effType = DuckovTypeUtils.FindType(effectTypeFullName);
                 if (effType == null) return RichResult.Fail(ErrorCode.NotFound, "effect type not found");
-                var go = DuckovTypeUtils.GetMaybe(item, new[]{"gameObject"}) as UnityEngine.GameObject; if (go == null) return RichResult.Fail(ErrorCode.NotSupported, "item has no gameObject");
+                var go = DuckovTypeUtils.GetMaybe(item, new[] { "gameObject" }) as UnityEngine.GameObject; if (go == null) return RichResult.Fail(ErrorCode.NotSupported, "item has no gameObject");
                 var child = new UnityEngine.GameObject(options?.Name ?? ("New " + effType.Name)); child.hideFlags = UnityEngine.HideFlags.HideInInspector; child.transform.SetParent(go.transform, false);
                 var effect = child.AddComponent(effType);
                 if (options != null)
                 {
-                    if (options.Display.HasValue) { try { DuckovReflectionCache.GetSetter(effType, "display", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(effect, options.Display.Value); } catch { } }
-                    if (!string.IsNullOrEmpty(options.Description)) { try { DuckovReflectionCache.GetSetter(effType, "description", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(effect, options.Description); } catch { } }
+                    if (options.Display.HasValue) { try { DuckovReflectionCache.GetSetter(effType, "display", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(effect, options.Display.Value); } catch { } }
+                    if (!string.IsNullOrEmpty(options.Description)) { try { DuckovReflectionCache.GetSetter(effType, "description", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(effect, options.Description); } catch { } }
                 }
-                var effectsList = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item);
-                var add = DuckovReflectionCache.GetMethod(effectsList?.GetType(), "Add", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ effType }); add?.Invoke(effectsList, new[]{ effect });
-                var setItem = DuckovReflectionCache.GetMethod(effType, "SetItem", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ item.GetType() })
-                              ?? DuckovReflectionCache.GetMethod(effType, "SetItem", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                setItem?.Invoke(effect, new[]{ item });
+                var effectsList = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var add = DuckovReflectionCache.GetMethod(effectsList?.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { effType }); add?.Invoke(effectsList, new[] { effect });
+                var setItem = DuckovReflectionCache.GetMethod(effType, "SetItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { item.GetType() })
+                              ?? DuckovReflectionCache.GetMethod(effType, "SetItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                setItem?.Invoke(effect, new[] { item });
                 if (options?.Enabled == true) { try { (effect as UnityEngine.Behaviour).enabled = true; } catch { } }
                 return RichResult.Success();
             }
@@ -455,7 +455,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex] as UnityEngine.Component; effects.RemoveAt(effectIndex);
@@ -470,7 +470,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex] as UnityEngine.Behaviour; if (effect == null) return RichResult.Fail(ErrorCode.NotSupported, "effect not Behaviour");
@@ -484,12 +484,12 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null || string.IsNullOrEmpty(propName)) return RichResult.Fail(ErrorCode.InvalidArgument, "args");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex]; var et = effect.GetType();
-                var setter = DuckovReflectionCache.GetSetter(et, propName, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)
-                          ?? DuckovReflectionCache.GetSetter(et, propName.ToLowerInvariant(), BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var setter = DuckovReflectionCache.GetSetter(et, propName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                          ?? DuckovReflectionCache.GetSetter(et, propName.ToLowerInvariant(), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "setter not found");
                 setter(effect, value); return RichResult.Success();
             }
@@ -501,21 +501,22 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null || string.IsNullOrEmpty(componentTypeFullName) || string.IsNullOrEmpty(kind)) return RichResult.Fail(ErrorCode.InvalidArgument, "args");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex] as UnityEngine.Component; if (effect == null) return RichResult.Fail(ErrorCode.OperationFailed, "effect null");
                 var type = DuckovTypeUtils.FindType(componentTypeFullName); if (type == null) return RichResult.Fail(ErrorCode.NotFound, "component type not found");
                 var comp = effect.gameObject.AddComponent(type);
-                var add = DuckovReflectionCache.GetMethod(effect.GetType(), "AddEffectComponent", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance, new[]{ DuckovTypeUtils.FindType("ItemStatsSystem.EffectComponent") ?? typeof(UnityEngine.Component) })
-                          ?? DuckovReflectionCache.GetMethod(effect.GetType(), "AddEffectComponent", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                if (add != null) add.Invoke(effect, new[]{ comp }); else
+                var add = DuckovReflectionCache.GetMethod(effect.GetType(), "AddEffectComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { DuckovTypeUtils.FindType("ItemStatsSystem.EffectComponent") ?? typeof(UnityEngine.Component) })
+                          ?? DuckovReflectionCache.GetMethod(effect.GetType(), "AddEffectComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (add != null) add.Invoke(effect, new[] { comp });
+                else
                 {
                     var fieldName = kind.Equals("Trigger", StringComparison.OrdinalIgnoreCase) ? "triggers" : kind.Equals("Filter", StringComparison.OrdinalIgnoreCase) ? "filters" : "actions";
-                    var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
+                    var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
                     list?.Add(comp);
                 }
-                try { DuckovReflectionCache.GetSetter(type, "Master", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(comp, effect); } catch { }
+                try { DuckovReflectionCache.GetSetter(type, "Master", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(comp, effect); } catch { }
                 return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryAddEffectComponent failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
@@ -526,12 +527,12 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null || string.IsNullOrEmpty(kind)) return RichResult.Fail(ErrorCode.InvalidArgument, "args");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex] as UnityEngine.Component; if (effect == null) return RichResult.Fail(ErrorCode.OperationFailed, "effect null");
                 var fieldName = kind.Equals("Trigger", StringComparison.OrdinalIgnoreCase) ? "triggers" : kind.Equals("Filter", StringComparison.OrdinalIgnoreCase) ? "filters" : "actions";
-                var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
+                var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
                 if (list == null || componentIndex < 0 || componentIndex >= list.Count) return RichResult.Fail(ErrorCode.OutOfRange, "component index");
                 var comp = list[componentIndex] as UnityEngine.Component; list.RemoveAt(componentIndex);
                 if (comp != null) { try { UnityEngine.Object.DestroyImmediate(comp); } catch { try { UnityEngine.Object.Destroy(comp); } catch { } } }
@@ -545,14 +546,14 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null || string.IsNullOrEmpty(kind) || string.IsNullOrEmpty(propName)) return RichResult.Fail(ErrorCode.InvalidArgument, "args");
-                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
+                var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IList;
                 if (effects == null) return RichResult.Fail(ErrorCode.NotSupported, "no Effects list");
                 if (effectIndex < 0 || effectIndex >= effects.Count) return RichResult.Fail(ErrorCode.OutOfRange, "index");
                 var effect = effects[effectIndex]; var fieldName = kind.Equals("Trigger", StringComparison.OrdinalIgnoreCase) ? "triggers" : kind.Equals("Filter", StringComparison.OrdinalIgnoreCase) ? "filters" : "actions";
-                var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
+                var list = DuckovReflectionCache.GetField(effect.GetType(), fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(effect) as System.Collections.IList;
                 if (list == null || componentIndex < 0 || componentIndex >= list.Count) return RichResult.Fail(ErrorCode.OutOfRange, "component index");
-                var comp = list[componentIndex]; var setter = DuckovReflectionCache.GetSetter(comp.GetType(), propName, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)
-                           ?? DuckovReflectionCache.GetSetter(comp.GetType(), propName.ToLowerInvariant(), BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var comp = list[componentIndex]; var setter = DuckovReflectionCache.GetSetter(comp.GetType(), propName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                           ?? DuckovReflectionCache.GetSetter(comp.GetType(), propName.ToLowerInvariant(), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "setter not found");
                 setter(comp, value); return RichResult.Success();
             }

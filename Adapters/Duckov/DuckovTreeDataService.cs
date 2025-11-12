@@ -6,7 +6,10 @@ using ItemModKit.Core;
 
 namespace ItemModKit.Adapters.Duckov
 {
-    // TreeData 风味的导出/基础导入/完整克隆到背包（临时实验版，可随时移除或扩展）
+    /// <summary>
+    /// TreeData 工具：提供 Duckov ItemTreeData 的导出、最小导入与基于引擎 API 的整树克隆能力。
+    /// 注意：为实验性特性，未来可能调整或移除。
+    /// </summary>
     public static class DuckovTreeDataService
     {
         private static bool s_inited;
@@ -41,38 +44,44 @@ namespace ItemModKit.Adapters.Duckov
             {
                 tTree = DuckovTypeUtils.FindType("ItemStatsSystem.Data.ItemTreeData");
                 if (tTree == null) return;
-                miFromItem = tTree.GetMethod("FromItem", BindingFlags.Public|BindingFlags.Static);
-                miInstantiateAsync = tTree.GetMethod("InstantiateAsync", BindingFlags.Public|BindingFlags.Static);
-                fiEntries = tTree.GetField("entries", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                piRootTypeId = tTree.GetProperty("RootTypeID", BindingFlags.Public|BindingFlags.Instance);
-                piRootData = tTree.GetProperty("RootData", BindingFlags.Public|BindingFlags.Instance);
+                miFromItem = tTree.GetMethod("FromItem", BindingFlags.Public | BindingFlags.Static);
+                miInstantiateAsync = tTree.GetMethod("InstantiateAsync", BindingFlags.Public | BindingFlags.Static);
+                fiEntries = tTree.GetField("entries", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                piRootTypeId = tTree.GetProperty("RootTypeID", BindingFlags.Public | BindingFlags.Instance);
+                piRootData = tTree.GetProperty("RootData", BindingFlags.Public | BindingFlags.Instance);
                 tDataEntry = DuckovTypeUtils.FindType("ItemStatsSystem.Data.ItemTreeData+DataEntry");
                 if (tDataEntry != null)
                 {
-                    fiDE_InstanceID = tDataEntry.GetField("instanceID", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                    fiDE_TypeID = tDataEntry.GetField("typeID", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                    fiDE_Variables = tDataEntry.GetField("variables", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                    fiDE_SlotContents = tDataEntry.GetField("slotContents", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                    fiDE_Inventory = tDataEntry.GetField("inventory", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                    fiDE_InventorySortLocks = tDataEntry.GetField("inventorySortLocks", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    fiDE_InstanceID = tDataEntry.GetField("instanceID", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    fiDE_TypeID = tDataEntry.GetField("typeID", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    fiDE_Variables = tDataEntry.GetField("variables", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    fiDE_SlotContents = tDataEntry.GetField("slotContents", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    fiDE_Inventory = tDataEntry.GetField("inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    fiDE_InventorySortLocks = tDataEntry.GetField("inventorySortLocks", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 }
                 tCustomData = DuckovTypeUtils.FindType("Duckov.Utilities.CustomData");
                 if (tCustomData != null)
                 {
-                    piCD_Key = tCustomData.GetProperty("Key", BindingFlags.Public|BindingFlags.Instance);
-                    piCD_DataType = tCustomData.GetProperty("DataType", BindingFlags.Public|BindingFlags.Instance);
-                    piCD_DisplayName = tCustomData.GetProperty("DisplayName", BindingFlags.Public|BindingFlags.Instance);
-                    piCD_Display = tCustomData.GetProperty("Display", BindingFlags.Public|BindingFlags.Instance);
-                    miCD_GetInt = tCustomData.GetMethod("GetInt", BindingFlags.Public|BindingFlags.Instance);
-                    miCD_GetFloat = tCustomData.GetMethod("GetFloat", BindingFlags.Public|BindingFlags.Instance);
-                    miCD_GetBool = tCustomData.GetMethod("GetBool", BindingFlags.Public|BindingFlags.Instance);
-                    miCD_GetString = tCustomData.GetMethod("GetString", BindingFlags.Public|BindingFlags.Instance);
-                    miCD_GetRawCopied = tCustomData.GetMethod("GetRawCopied", BindingFlags.Public|BindingFlags.Instance);
+                    piCD_Key = tCustomData.GetProperty("Key", BindingFlags.Public | BindingFlags.Instance);
+                    piCD_DataType = tCustomData.GetProperty("DataType", BindingFlags.Public | BindingFlags.Instance);
+                    piCD_DisplayName = tCustomData.GetProperty("DisplayName", BindingFlags.Public | BindingFlags.Instance);
+                    piCD_Display = tCustomData.GetProperty("Display", BindingFlags.Public | BindingFlags.Instance);
+                    miCD_GetInt = tCustomData.GetMethod("GetInt", BindingFlags.Public | BindingFlags.Instance);
+                    miCD_GetFloat = tCustomData.GetMethod("GetFloat", BindingFlags.Public | BindingFlags.Instance);
+                    miCD_GetBool = tCustomData.GetMethod("GetBool", BindingFlags.Public | BindingFlags.Instance);
+                    miCD_GetString = tCustomData.GetMethod("GetString", BindingFlags.Public | BindingFlags.Instance);
+                    miCD_GetRawCopied = tCustomData.GetMethod("GetRawCopied", BindingFlags.Public | BindingFlags.Instance);
                 }
             }
             catch { }
         }
 
+        /// <summary>
+        /// 导出指定物品的 TreeData 表示。
+        /// </summary>
+        /// <param name="item">源物品。</param>
+        /// <param name="maxEntries">最大导出条目数上限，超出返回失败。</param>
+        /// <returns>包含 version/rootTypeId/entries 的对象映射。</returns>
         public static RichResult<object> TryExport(object item, int maxEntries = 512)
         {
             try
@@ -231,7 +240,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var f = t.GetField(name, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var f = t.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (f != null)
                 {
                     var v = f.GetValue(obj);
@@ -239,8 +248,8 @@ namespace ItemModKit.Adapters.Duckov
                     if (v == null) return default;
                     try { return (T)Convert.ChangeType(v, typeof(T)); } catch { return default; }
                 }
-                var p = t.GetProperty(name, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                if (p != null && p.CanRead && p.GetIndexParameters().Length==0)
+                var p = t.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (p != null && p.CanRead && p.GetIndexParameters().Length == 0)
                 {
                     var v = p.GetValue(obj, null);
                     if (v is T tv) return tv;
@@ -254,7 +263,11 @@ namespace ItemModKit.Adapters.Duckov
         private static object SafeGet(PropertyInfo p, object obj)
         { try { return p?.GetValue(obj, null); } catch { return null; } }
 
-        // 基础导入（实验版）：仅创建 rootTypeId 的空物品并写入变量（忽略子节点结构）
+        /// <summary>
+        /// 最小导入：仅创建根类型并写入首条条目的变量，忽略层级结构。
+        /// </summary>
+        /// <param name="exportData">由 TryExport 产出的 JSON 对象。</param>
+        /// <returns>成功包含新物品实例。</returns>
         public static RichResult<object> TryImportMinimal(JObject exportData)
         {
             try
@@ -314,7 +327,11 @@ namespace ItemModKit.Adapters.Duckov
             }
         }
 
-        // 完整导入：直接用 ItemTreeData.InstantiateAsync 重建整棵树（不进行 JSON 重建，源自现有 item）
+        /// <summary>
+        /// 基于引擎的 ItemTreeData.InstantiateAsync 重建整棵子树。
+        /// </summary>
+        /// <param name="source">源物品。</param>
+        /// <returns>成功返回新物品。</returns>
         public static RichResult<object> TryCloneFromSource(object source)
         {
             try
@@ -332,7 +349,11 @@ namespace ItemModKit.Adapters.Duckov
             catch (Exception ex) { Log.Error("TryCloneFromSource failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        // 克隆并放入玩家背包
+        /// <summary>
+        /// 克隆并放入玩家背包。
+        /// </summary>
+        /// <param name="source">源物品。</param>
+        /// <returns>成功返回新物品；失败携带错误码。</returns>
         public static RichResult<object> TryCloneIntoPlayerInventory(object source)
         {
             var clone = TryCloneFromSource(source);
@@ -349,7 +370,12 @@ namespace ItemModKit.Adapters.Duckov
             catch (Exception ex) { Log.Error("TryCloneIntoPlayerInventory failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        // 高级克隆（过渡保留）：改为转发到总线化管线
+        /// <summary>
+        /// 高级克隆（过渡保留）：改为转发到总线化克隆管线。
+        /// </summary>
+        /// <param name="source">源物品。</param>
+        /// <param name="target">目标标识（character/storage/null）。</param>
+        /// <returns>成功返回新物品。</returns>
         [Obsolete("Use IMKDuckov.Clone.TryCloneToInventory (bus-oriented pipeline).", false)]
         public static RichResult<object> TryCloneIntoInventoryAdvanced(object source, string target = null)
         {
@@ -367,7 +393,13 @@ namespace ItemModKit.Adapters.Duckov
             return RichResult<object>.Success(r.Value.NewItem);
         }
 
-        // 高级克隆+诊断（过渡保留）：转发到总线化管线并返回诊断
+        /// <summary>
+        /// 高级克隆 + 诊断（过渡保留）：转发到总线化管线并附带诊断数据。
+        /// </summary>
+        /// <param name="source">源物品。</param>
+        /// <param name="target">目标标识。</param>
+        /// <param name="sampleLimit">样本限制（保留字段）。</param>
+        /// <returns>返回 (结果, 诊断字典)。</returns>
         [Obsolete("Use IMKDuckov.Clone.TryCloneToInventory (bus-oriented pipeline).", false)]
         public static (RichResult<object> result, Dictionary<string, object> diag) TryCloneIntoInventoryAdvancedWithDiag(object source, string target = null, int sampleLimit = 32)
         {
@@ -395,15 +427,15 @@ namespace ItemModKit.Adapters.Duckov
             if (uniTask == null) return null;
             try
             {
-                var getAwaiter = uniTask.GetType().GetMethod("GetAwaiter", BindingFlags.Public|BindingFlags.Instance);
+                var getAwaiter = uniTask.GetType().GetMethod("GetAwaiter", BindingFlags.Public | BindingFlags.Instance);
                 var awaiter = getAwaiter?.Invoke(uniTask, null);
-                var isCompletedProp = awaiter?.GetType().GetProperty("IsCompleted", BindingFlags.Public|BindingFlags.Instance);
+                var isCompletedProp = awaiter?.GetType().GetProperty("IsCompleted", BindingFlags.Public | BindingFlags.Instance);
                 int spins = 0;
                 while (isCompletedProp != null && !(bool)(isCompletedProp.GetValue(awaiter, null) ?? false) && spins++ < 200)
                 {
                     try { System.Threading.Thread.Sleep(1); } catch { }
                 }
-                var getResult = awaiter?.GetType().GetMethod("GetResult", BindingFlags.Public|BindingFlags.Instance);
+                var getResult = awaiter?.GetType().GetMethod("GetResult", BindingFlags.Public | BindingFlags.Instance);
                 return getResult?.Invoke(awaiter, null);
             }
             catch { return null; }
@@ -414,7 +446,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 var tPS = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.PlayerStorage") ?? DuckovTypeUtils.FindType("PlayerStorage");
-                var pInv = tPS?.GetProperty("Inventory", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                var pInv = tPS?.GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 var inv = pInv?.GetValue(null, null);
                 if (inv != null) return inv;
             }
@@ -422,19 +454,19 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 var tLM = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.LevelManager") ?? DuckovTypeUtils.FindType("LevelManager");
-                var pInst = tLM?.GetProperty("Instance", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                var pInst = tLM?.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 var lm = pInst?.GetValue(null, null);
                 if (lm != null)
                 {
-                    var pMain = lm.GetType().GetProperty("MainCharacter", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                    var pMain = lm.GetType().GetProperty("MainCharacter", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var main = pMain?.GetValue(lm, null);
                     if (main != null)
                     {
-                        var pCharItem = main.GetType().GetProperty("CharacterItem", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                        var pCharItem = main.GetType().GetProperty("CharacterItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         var chItem = pCharItem?.GetValue(main, null);
                         if (chItem != null)
                         {
-                            var pInv = chItem.GetType().GetProperty("Inventory", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                            var pInv = chItem.GetType().GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                             var inv = pInv?.GetValue(chItem, null);
                             if (inv != null) return inv;
                         }

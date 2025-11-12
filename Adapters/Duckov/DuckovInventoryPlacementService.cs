@@ -11,6 +11,11 @@ namespace ItemModKit.Adapters.Duckov
         /// <summary>
         /// 尝试放置：优先 AddAndMerge，然后查询 IndexOf 确认；若失败可调度下一帧重试。
         /// </summary>
+        /// <param name="inventory">目标背包。</param>
+        /// <param name="item">待放置物品。</param>
+        /// <param name="allowMerge">是否允许合并。</param>
+        /// <param name="enableDeferredRetry">是否在失败时安排下一帧重试。</param>
+        /// <returns>返回是否添加、索引以及是否安排了延迟重试。</returns>
         public (bool added, int index, bool deferredScheduled) TryPlace(object inventory, object item, bool allowMerge = true, bool enableDeferredRetry = true)
         {
             if (inventory == null || item == null) return (false, -1, false);
@@ -25,6 +30,7 @@ namespace ItemModKit.Adapters.Duckov
             return (added, index, deferred);
         }
 
+        /// <summary>安排在下一帧执行一个动作（用于降低当前帧压力）。</summary>
         private static void TryScheduleNextFrame(Action a)
         {
             try
@@ -37,8 +43,8 @@ namespace ItemModKit.Adapters.Duckov
         }
         private sealed class DeferredInvoker : UnityEngine.MonoBehaviour
         {
-            private Action _a; public void Init(Action a){ _a=a; }
-            private System.Collections.IEnumerator Start(){ yield return null; try{ _a?.Invoke(); }catch{} try{ UnityEngine.Object.DestroyImmediate(gameObject); }catch{} }
+            private Action _a; public void Init(Action a) { _a = a; }
+            private System.Collections.IEnumerator Start() { yield return null; try { _a?.Invoke(); } catch { } try { UnityEngine.Object.DestroyImmediate(gameObject); } catch { } }
         }
     }
 }

@@ -15,6 +15,7 @@ namespace ItemModKit.Core
         private static double _maxItemMs;
         private static double _totalItemMs;
 
+        /// <summary>重置统计。</summary>
         public static void Reset()
         {
             Interlocked.Exchange(ref _items, 0);
@@ -23,6 +24,9 @@ namespace ItemModKit.Core
             _lastItemMs = 0; _maxItemMs = 0; _totalItemMs = 0;
         }
 
+        /// <summary>记录单个物品写入样本。</summary>
+        /// <param name="jsonBytes">嵌入 JSON 的字节数。</param>
+        /// <param name="ms">写入耗时（毫秒）。</param>
         public static void RecordItem(int jsonBytes, double ms)
         {
             Interlocked.Increment(ref _items);
@@ -32,8 +36,10 @@ namespace ItemModKit.Core
             _totalItemMs += ms;
         }
 
+        /// <summary>记录一次 Flush 操作发生。</summary>
         public static void RecordFlushOp() => Interlocked.Increment(ref _flushOps);
 
+        /// <summary>生成当前统计快照。</summary>
         public static PerfSnapshot Snapshot()
         {
             return new PerfSnapshot
@@ -49,11 +55,17 @@ namespace ItemModKit.Core
 
         internal sealed class PerfSnapshot
         {
+            /// <summary>记录的物品样本数。</summary>
             public long Items;
+            /// <summary>累计 JSON 字节数。</summary>
             public long JsonBytes;
+            /// <summary>累计 Flush 操作数。</summary>
             public long FlushOps;
+            /// <summary>最近一次物品写入耗时。</summary>
             public double LastItemMs;
+            /// <summary>单个物品写入最大耗时。</summary>
             public double MaxItemMs;
+            /// <summary>平均每个物品写入耗时。</summary>
             public double AvgItemMs;
         }
     }

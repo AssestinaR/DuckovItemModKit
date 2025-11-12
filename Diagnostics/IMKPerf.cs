@@ -6,6 +6,9 @@ using UnityEngine;
 
 namespace ItemModKit.Diagnostics
 {
+    /// <summary>
+    /// 轻量性能探针：提供 Scope 包裹与日志输出，便于在开发期采样热点。
+    /// </summary>
     public static class IMKPerf
     {
         private static readonly double s_tickMs = 1000.0 / Stopwatch.Frequency;
@@ -14,7 +17,12 @@ namespace ItemModKit.Diagnostics
         private static double s_minMs = Math.Max(0, ParseDoubleEnv("IMK_PROF_MINMS", 2.0));
         private static int s_seq;
 
-        // Allow runtime enable/disable and threshold tuning
+        /// <summary>
+        /// 启用/禁用采样并可调整采样率与最小阈值。
+        /// </summary>
+        /// <param name="enabled">是否启用。</param>
+        /// <param name="sample">采样间隔（每 N 次记录一次）。</param>
+        /// <param name="minMs">最小记录阈值（毫秒）。</param>
         public static void Enable(bool enabled = true, int? sample = null, double? minMs = null)
         {
             s_enabled = enabled;
@@ -23,6 +31,14 @@ namespace ItemModKit.Diagnostics
             UnityEngine.Debug.Log($"[IMK-PERF] Enabled={s_enabled} sample={s_sample} minMs={s_minMs}");
         }
 
+        /// <summary>
+        /// 创建一个性能作用域，满足采样与阈值条件时在 Dispose 时输出日志。
+        /// </summary>
+        /// <param name="name">区段名称。</param>
+        /// <param name="area">区域/模块名。</param>
+        /// <param name="member">调用成员（自动填写）。</param>
+        /// <param name="file">调用文件（自动填写）。</param>
+        /// <param name="line">调用行号（自动填写）。</param>
         public static ScopeToken Scope(string name, string area = null,
             [CallerMemberName] string member = null,
             [CallerFilePath] string file = null,
@@ -45,6 +61,9 @@ namespace ItemModKit.Diagnostics
             return def;
         }
 
+        /// <summary>
+        /// 性能作用域令牌：在 Dispose 时根据阈值输出 JSON 行与可读行。
+        /// </summary>
         public readonly struct ScopeToken : IDisposable
         {
             private readonly string _name;
@@ -59,6 +78,9 @@ namespace ItemModKit.Diagnostics
             private readonly double _minMs;
             private readonly bool _active;
 
+            /// <summary>
+            /// 构造作用域令牌（内部使用）。
+            /// </summary>
             public ScopeToken(string name, string area, string member, string file, int line, double minMs)
             {
                 _name = name; _area = area; _member = member; _file = file; _line = line; _minMs = minMs;
@@ -69,6 +91,7 @@ namespace ItemModKit.Diagnostics
                 _active = true;
             }
 
+            /// <summary>结束作用域并按需输出日志。</summary>
             public void Dispose()
             {
                 if (!_active) return;
@@ -82,8 +105,8 @@ namespace ItemModKit.Diagnostics
                 try
                 {
                     var ts = DateTime.Now.ToString("O");
-                    // JSON line (machine friendly)
-                    var json = $"{{\"ts\":\"{ts}\",\"kind\":\"span\",\"name\":\"{Escape(_name)}\",\"durMs\":{dur:0.###},\"area\":\"{Escape(_area)}\",\"frame\":{_frame},\"mem\":{memDelta},\"gc0\":{d0},\"gc1\":{d1},\"gc2\":{d2},\"file\":\"{Escape(_file)}\",\"member\":\"{Escape(_member)}\",\"line\":{_line}}}";
+                    // JSON line (machine friendly) - avoid interpolated braces
+                    var json = "{\"ts\":\"" + ts + "\",\"kind\":\"span\",\"name\":\"" + Escape(_name) + "\",\"durMs\":" + dur.ToString("0.###") + ",\"area\":\"" + Escape(_area) + "\",\"frame\":" + _frame + ",\"mem\":" + memDelta + ",\"gc0\":" + d0 + ",\"gc1\":" + d1 + ",\"gc2\":" + d2 + ",\"file\":\"" + Escape(_file) + "\",\"member\":\"" + Escape(_member) + "\",\"line\":" + _line + "}";
                     UnityEngine.Debug.Log(json);
                     // Plain line (human friendly)
                     var fileOnly = SafePath(_file);

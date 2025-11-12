@@ -64,7 +64,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Order", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Order", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "Order setter missing");
                 setter(item, order);
                 return RichResult.Success();
@@ -77,8 +77,8 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "soundKey", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)
-                             ?? DuckovReflectionCache.GetSetter(item.GetType(), "SoundKey", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "soundKey", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                             ?? DuckovReflectionCache.GetSetter(item.GetType(), "SoundKey", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "soundKey setter missing");
                 setter(item, soundKey);
                 return RichResult.Success();
@@ -91,7 +91,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "weight", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "weight", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "weight setter missing");
                 setter(item, baseWeight);
                 return RichResult.Success();
@@ -104,7 +104,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Icon", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Icon", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setter == null) return RichResult.Fail(ErrorCode.NotSupported, "Icon setter missing");
                 setter(item, sprite);
                 return RichResult.Success();
