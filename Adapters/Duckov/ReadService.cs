@@ -12,7 +12,7 @@ namespace ItemModKit.Adapters.Duckov
     /// - 推导信息：堆叠、耐久、检查状态、排序、重量、关系、标志、声音键
     /// - 高级：统计快照、子背包信息/枚举、效果列表、贴图/Agent 等
     /// </summary>
-    internal sealed class ReadService : IReadService
+    internal sealed partial class ReadService : IReadService
     {
         private readonly IItemAdapter _item;
         public ReadService(IItemAdapter item) { _item = item; }
@@ -47,23 +47,11 @@ namespace ItemModKit.Adapters.Duckov
             try { if (item == null) return RichResult<VariableEntry[]>.Fail(ErrorCode.InvalidArgument, "item is null"); return RichResult<VariableEntry[]>.Success(_item.GetConstants(item)); }
             catch (Exception ex) { Log.Error("TryReadConstants failed", ex); return RichResult<VariableEntry[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>读取修饰器列表。</summary>
-        public RichResult<ModifierEntry[]> TryReadModifiers(object item)
-        {
-            try { if (item == null) return RichResult<ModifierEntry[]>.Fail(ErrorCode.InvalidArgument, "item is null"); return RichResult<ModifierEntry[]>.Success(_item.GetModifiers(item)); }
-            catch (Exception ex) { Log.Error("TryReadModifiers failed", ex); return RichResult<ModifierEntry[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
         /// <summary>读取标签列表。</summary>
         public RichResult<string[]> TryReadTags(object item)
         {
             try { if (item == null) return RichResult<string[]>.Fail(ErrorCode.InvalidArgument, "item is null"); return RichResult<string[]>.Success(_item.GetTags(item)); }
             catch (Exception ex) { Log.Error("TryReadTags failed", ex); return RichResult<string[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
-        /// <summary>读取槽位列表。</summary>
-        public RichResult<SlotEntry[]> TryReadSlots(object item)
-        {
-            try { if (item == null) return RichResult<SlotEntry[]>.Fail(ErrorCode.InvalidArgument, "item is null"); return RichResult<SlotEntry[]>.Success(_item.GetSlots(item)); }
-            catch (Exception ex) { Log.Error("TryReadSlots failed", ex); return RichResult<SlotEntry[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
         #endregion
 
@@ -220,32 +208,6 @@ namespace ItemModKit.Adapters.Duckov
 
         #region Advanced infos
         /// <summary>读取数值统计快照（遍历 Stats 集合）。</summary>
-        public RichResult<StatsSnapshot> TryReadStats(object item)
-        {
-            try
-            {
-                if (item == null) return RichResult<StatsSnapshot>.Fail(ErrorCode.InvalidArgument, "item is null");
-                var snap = new StatsSnapshot();
-                try
-                {
-                    var getStats = DuckovReflectionCache.GetGetter(item.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var stats = getStats?.Invoke(item) as System.Collections.IEnumerable;
-                    if (stats != null)
-                    {
-                        foreach (var st in stats)
-                        {
-                            if (st == null) continue;
-                            string key = Convert.ToString(DuckovTypeUtils.GetMaybe(st, new[] { "Key", "key", "Name", "name" })) ?? string.Empty;
-                            float val = DuckovTypeUtils.ConvertToFloat(DuckovTypeUtils.GetMaybe(st, new[] { "Value", "value" }));
-                            snap.Entries.Add(new StatValueEntry { Key = key, Value = val });
-                        }
-                    }
-                }
-                catch { }
-                return RichResult<StatsSnapshot>.Success(snap);
-            }
-            catch (Exception ex) { Log.Error("TryReadStats failed", ex); return RichResult<StatsSnapshot>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
         /// <summary>读取子背包的容量与数量。</summary>
         public RichResult<InventorySnapshot> TryReadChildInventoryInfo(object item)
         {
@@ -288,32 +250,6 @@ namespace ItemModKit.Adapters.Duckov
             }
             catch (Exception ex) { Log.Error("TryEnumerateChildInventoryItems failed", ex); return RichResult<object[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>读取效果组件（名称 + 是否启用）。</summary>
-        public RichResult<EffectEntry[]> TryReadEffects(object item)
-        {
-            try
-            {
-                if (item == null) return RichResult<EffectEntry[]>.Fail(ErrorCode.InvalidArgument, "item is null");
-                var list = new List<EffectEntry>();
-                try
-                {
-                    var effects = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
-                    if (effects != null)
-                    {
-                        foreach (var e in effects)
-                        {
-                            if (e == null) continue;
-                            string name = null; bool enabled = false;
-                            try { var go = DuckovTypeUtils.GetMaybe(e, new[] { "gameObject" }) as UnityEngine.GameObject; if (go != null) { name = go.name; enabled = go.activeInHierarchy; } } catch { name = e.GetType().Name; }
-                            list.Add(new EffectEntry { Name = name ?? e.GetType().Name, Enabled = enabled });
-                        }
-                    }
-                }
-                catch { }
-                return RichResult<EffectEntry[]>.Success(list.ToArray());
-            }
-            catch (Exception ex) { Log.Error("TryReadEffects failed", ex); return RichResult<EffectEntry[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
         /// <summary>读取 ItemGraphic（是否存在、名称）。</summary>
         public RichResult<ItemGraphicSnapshot> TryReadItemGraphic(object item)
         {
@@ -347,153 +283,9 @@ namespace ItemModKit.Adapters.Duckov
             catch (Exception ex) { Log.Error("Snapshot failed", ex); return RichResult<ItemSnapshot>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        #region Readout Extra
-        /// <summary>读取修饰器描述信息（Key/Type/Value/Order/Display/Target）。</summary>
-        public RichResult<ModifierDescriptionInfo[]> TryReadModifierDescriptions(object item)
-        {
-            try
-            {
-                if (item == null) return RichResult<ModifierDescriptionInfo[]>.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
-                if (modsCol == null) return RichResult<ModifierDescriptionInfo[]>.Success(Array.Empty<ModifierDescriptionInfo>());
-                var list = new List<ModifierDescriptionInfo>();
-                foreach (var m in modsCol)
-                {
-                    if (m == null) continue;
-                    var dto = new ModifierDescriptionInfo();
-                    try { dto.Key = Convert.ToString(DuckovTypeUtils.GetMaybe(m, new[] { "Key", "key" })); } catch { }
-                    try { var t = DuckovTypeUtils.GetMaybe(m, new[] { "Type", "type" }); dto.Type = t != null ? Convert.ToString(t) : null; } catch { }
-                    try { var v = DuckovTypeUtils.GetMaybe(m, new[] { "Value", "value" }); dto.Value = DuckovTypeUtils.ConvertToFloat(v); } catch { }
-                    try { var o = DuckovTypeUtils.GetMaybe(m, new[] { "Order", "order" }); if (o != null) dto.Order = Convert.ToInt32(o); } catch { }
-                    try { var d = DuckovTypeUtils.GetMaybe(m, new[] { "Display", "display" }); if (d != null) dto.Display = Convert.ToBoolean(d); } catch { }
-                    try { var tg = DuckovTypeUtils.GetMaybe(m, new[] { "Target", "target" }); dto.Target = tg != null ? Convert.ToString(tg) : null; } catch { }
-                    list.Add(dto);
-                }
-                return RichResult<ModifierDescriptionInfo[]>.Success(list.ToArray());
-            }
-            catch (Exception ex) { Log.Error("TryReadModifierDescriptions failed", ex); return RichResult<ModifierDescriptionInfo[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
-
-        /// <summary>读取效果组件的详细信息（显示/描述/触发/过滤/动作 类型）。</summary>
-        public RichResult<EffectInfo[]> TryReadEffectsDetailed(object item)
-        {
-            try
-            {
-                if (item == null) return RichResult<EffectInfo[]>.Fail(ErrorCode.InvalidArgument, "item is null");
-                var list = new List<EffectInfo>();
-                var effectsEnum = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
-                if (effectsEnum != null)
-                {
-                    foreach (var e in effectsEnum)
-                    {
-                        if (e == null) continue;
-                        var info = new EffectInfo();
-                        try { var go = DuckovTypeUtils.GetMaybe(e, new[] { "gameObject" }) as UnityEngine.GameObject; info.Name = go != null ? go.name : e.GetType().Name; } catch { info.Name = e.GetType().Name; }
-                        try { var en = DuckovTypeUtils.GetMaybe(e, new[] { "enabled" }); if (en != null) info.Enabled = Convert.ToBoolean(en); } catch { }
-                        try { var d = DuckovTypeUtils.GetMaybe(e, new[] { "display", "Display" }); if (d != null) info.Display = Convert.ToBoolean(d); } catch { }
-                        try { var desc = DuckovTypeUtils.GetMaybe(e, new[] { "description", "Description" }); if (desc != null) info.Description = Convert.ToString(desc); } catch { }
-                        try
-                        {
-                            var ts = DuckovTypeUtils.GetMaybe(e, new[] { "triggers", "Triggers" }) as System.Collections.IEnumerable;
-                            var types = new List<string>(); if (ts != null) foreach (var t in ts) if (t != null) types.Add(t.GetType().FullName);
-                            info.TriggerTypes = types.ToArray();
-                        }
-                        catch { info.TriggerTypes = Array.Empty<string>(); }
-                        try
-                        {
-                            var fs = DuckovTypeUtils.GetMaybe(e, new[] { "filters", "Filters" }) as System.Collections.IEnumerable;
-                            var types = new List<string>(); if (fs != null) foreach (var f in fs) if (f != null) types.Add(f.GetType().FullName);
-                            info.FilterTypes = types.ToArray();
-                        }
-                        catch { info.FilterTypes = Array.Empty<string>(); }
-                        try
-                        {
-                            var ac = DuckovTypeUtils.GetMaybe(e, new[] { "actions", "Actions" }) as System.Collections.IEnumerable;
-                            var types = new List<string>(); if (ac != null) foreach (var a in ac) if (a != null) types.Add(a.GetType().FullName);
-                            info.ActionTypes = types.ToArray();
-                        }
-                        catch { info.ActionTypes = Array.Empty<string>(); }
-                        list.Add(info);
-                    }
-                }
-                return RichResult<EffectInfo[]>.Success(list.ToArray());
-            }
-            catch (Exception ex) { Log.Error("TryReadEffectsDetailed failed", ex); return RichResult<EffectInfo[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
-        /// <summary>读取效果组件的深度信息，包括触发器/过滤器/动作 的基本属性。</summary>
-        public RichResult<EffectDetails[]> TryReadEffectsDeep(object item)
-        {
-            try
-            {
-                if (item == null) return RichResult<EffectDetails[]>.Fail(ErrorCode.InvalidArgument, "item is null");
-                var list = new List<EffectDetails>();
-                var effectsEnum = DuckovReflectionCache.GetGetter(item.GetType(), "Effects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item) as System.Collections.IEnumerable;
-                if (effectsEnum != null)
-                {
-                    foreach (var e in effectsEnum)
-                    {
-                        if (e == null) continue;
-                        var det = new EffectDetails();
-                        try { var go = DuckovTypeUtils.GetMaybe(e, new[] { "gameObject" }) as UnityEngine.GameObject; det.Name = go != null ? go.name : e.GetType().Name; } catch { det.Name = e.GetType().Name; }
-                        try { var en = DuckovTypeUtils.GetMaybe(e, new[] { "enabled" }); if (en != null) det.Enabled = Convert.ToBoolean(en); } catch { }
-                        try { var d = DuckovTypeUtils.GetMaybe(e, new[] { "display", "Display" }); if (d != null) det.Display = Convert.ToBoolean(d); } catch { }
-                        try { var desc = DuckovTypeUtils.GetMaybe(e, new[] { "description", "Description" }); if (desc != null) det.Description = Convert.ToString(desc); } catch { }
-                        det.Triggers = ReadComponents(e, "triggers", "Trigger");
-                        det.Filters = ReadComponents(e, "filters", "Filter");
-                        det.Actions = ReadComponents(e, "actions", "Action");
-                        list.Add(det);
-                    }
-                }
-                return RichResult<EffectDetails[]>.Success(list.ToArray());
-            }
-            catch (Exception ex) { Log.Error("TryReadEffectsDeep failed", ex); return RichResult<EffectDetails[]>.Fail(ErrorCode.OperationFailed, ex.Message); }
-        }
-
-        private static EffectComponentDetails[] ReadComponents(object effect, string fieldName, string kind)
-        {
-            try
-            {
-                var et = effect.GetType();
-                var list = DuckovReflectionCache.GetField(et, fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(effect) as System.Collections.IEnumerable;
-                if (list == null) return Array.Empty<EffectComponentDetails>();
-                var res = new List<EffectComponentDetails>();
-                foreach (var c in list)
-                {
-                    if (c == null) continue;
-                    var dto = new EffectComponentDetails { Kind = kind, Type = c.GetType().FullName, Properties = new Dictionary<string, object>() };
-                    // Reflect primitive public fields/properties for quick view
-                    try
-                    {
-                        var ct = c.GetType();
-                        foreach (var p in ct.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                        {
-                            if (!p.CanRead) continue; var pt = p.PropertyType; if (!IsPrimitive(pt)) continue;
-                            try { dto.Properties[p.Name] = p.GetValue(c, null); } catch { }
-                        }
-                        foreach (var f in ct.GetFields(BindingFlags.Public | BindingFlags.Instance))
-                        {
-                            var ft = f.FieldType; if (!IsPrimitive(ft)) continue;
-                            try { dto.Properties[f.Name] = f.GetValue(c); } catch { }
-                        }
-                    }
-                    catch { }
-                    res.Add(dto);
-                }
-                return res.ToArray();
-            }
-            catch { return Array.Empty<EffectComponentDetails>(); }
-        }
-
-        private static bool IsPrimitive(Type t)
-        {
-            if (t == null) return false; if (t.IsEnum) return true;
-            return t == typeof(string) || t == typeof(int) || t == typeof(float) || t == typeof(double) || t == typeof(bool) || t == typeof(long) || t == typeof(short) || t == typeof(byte);
-        }
-
         private static object DuckovInventoryAdapter_GetItem(object inventory, int index)
         {
             try { var m = DuckovReflectionCache.GetMethod(inventory?.GetType(), "get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); return m?.Invoke(inventory, new object[] { index }); } catch { return null; }
         }
-        #endregion
     }
 }

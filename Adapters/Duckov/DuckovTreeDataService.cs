@@ -12,6 +12,25 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     public static class DuckovTreeDataService
     {
+        private sealed class ImportedTreeEntry
+        {
+            public int InstanceId { get; set; }
+            public int TypeId { get; set; }
+            public List<KeyValuePair<string, object>> Variables { get; } = new List<KeyValuePair<string, object>>();
+            public List<KeyValuePair<string, int>> Slots { get; } = new List<KeyValuePair<string, int>>();
+            public List<KeyValuePair<int, int>> Inventory { get; } = new List<KeyValuePair<int, int>>();
+        }
+
+        internal sealed class TreeImportDiagnostics
+        {
+            public string ImportMode { get; set; } = "minimal";
+            public bool FallbackUsed { get; set; }
+            public string FallbackStage { get; set; }
+            public string FallbackReason { get; set; }
+            public int EntriesRequested { get; set; }
+            public int EntriesImported { get; set; }
+        }
+
         private static bool s_inited;
         private static Type tTree;              // ItemStatsSystem.Data.ItemTreeData
         private static Type tDataEntry;         // nested DataEntry
@@ -93,6 +112,15 @@ namespace ItemModKit.Adapters.Duckov
                 var tree = miFromItem.Invoke(null, new[] { item });
                 if (tree == null) return RichResult<object>.Fail(ErrorCode.OperationFailed, "FromItem null");
                 var rootTypeId = SafeGet(piRootTypeId, tree) ?? 0;
+                var rootData = SafeGet(piRootData, tree);
+                var rootInstanceId = 0;
+                try
+                {
+                    rootInstanceId = rootData != null && fiDE_InstanceID != null
+                        ? Convert.ToInt32(fiDE_InstanceID.GetValue(rootData))
+                        : 0;
+                }
+                catch { rootInstanceId = 0; }
                 var entriesObj = fiEntries.GetValue(tree) as System.Collections.IEnumerable;
                 var outEntries = new List<object>();
                 if (entriesObj != null)
@@ -109,6 +137,7 @@ namespace ItemModKit.Adapters.Duckov
                 {
                     ["version"] = 1,
                     ["rootTypeId"] = rootTypeId,
+                    ["rootInstanceId"] = rootInstanceId,
                     ["entries"] = outEntries
                 };
                 return RichResult<object>.Success(root);
@@ -275,6 +304,7 @@ namespace ItemModKit.Adapters.Duckov
                 if (exportData == null) return RichResult<object>.Fail(ErrorCode.InvalidArgument, "json null");
                 var rootTypeId = exportData.Value<int?>("rootTypeId") ?? 0;
                 if (rootTypeId <= 0) return RichResult<object>.Fail(ErrorCode.InvalidArgument, "rootTypeId invalid");
+
                 object newItem = null;
                 try
                 {
@@ -282,12 +312,15 @@ namespace ItemModKit.Adapters.Duckov
                     if (gen.Ok) newItem = gen.Value;
                 }
                 catch { }
+
                 if (newItem == null)
                 {
                     var inst = IMKDuckov.Factory.TryInstantiateByTypeId(rootTypeId);
                     if (inst.Ok) newItem = inst.Value;
                 }
+
                 if (newItem == null) return RichResult<object>.Fail(ErrorCode.OperationFailed, "create item failed");
+
                 var entries = exportData["entries"] as JArray;
                 if (entries != null && entries.Count > 0)
                 {
@@ -295,29 +328,25 @@ namespace ItemModKit.Adapters.Duckov
                     var vars = first?["vars"] as JArray;
                     if (vars != null && vars.Count > 0)
                     {
-                        var kvList = new List<KeyValuePair<string, object>>();
-                        foreach (var v in vars)
+                        var values = new List<KeyValuePair<string, object>>();
+                        foreach (var varToken in vars)
                         {
-                            if (v is JObject o)
+                            if (!(varToken is JObject variableObject)) continue;
+                            var key = variableObject.Value<string>("k");
+                            if (string.IsNullOrEmpty(key)) continue;
+                            if (variableObject.TryGetValue("v", out var valueToken))
                             {
-                                var k = o.Value<string>("k");
-                                if (string.IsNullOrEmpty(k)) continue;
-                                if (o.TryGetValue("v", out var valToken))
-                                {
-                                    kvList.Add(new KeyValuePair<string, object>(k, ((JValue)valToken).Value));
-                                }
-                                else if (o.TryGetValue("raw", out var rawToken))
-                                {
-                                    // raw 暂不支持直接写入
-                                }
+                                values.Add(new KeyValuePair<string, object>(key, ConvertJTokenValue(valueToken)));
                             }
                         }
-                        if (kvList.Count > 0)
+
+                        if (values.Count > 0)
                         {
-                            try { IMKDuckov.Write.TryWriteVariables(newItem, kvList, overwrite: true); } catch { }
+                            try { IMKDuckov.Write.TryWriteVariables(newItem, values, overwrite: true); } catch { }
                         }
                     }
                 }
+
                 return RichResult<object>.Success(newItem);
             }
             catch (Exception ex)
@@ -327,12 +356,175 @@ namespace ItemModKit.Adapters.Duckov
             }
         }
 
+        internal static RichResult<object> TryImportTree(JObject exportData, out TreeImportDiagnostics diagnostics)
+        {
+            diagnostics = new TreeImportDiagnostics();
+            try
+            {
+                if (exportData == null) return RichResult<object>.Fail(ErrorCode.InvalidArgument, "json null");
+                var rootTypeId = exportData.Value<int?>("rootTypeId") ?? 0;
+                if (rootTypeId <= 0) return RichResult<object>.Fail(ErrorCode.InvalidArgument, "rootTypeId invalid");
+
+                var parsed = ParseImportedEntries(exportData);
+                diagnostics.EntriesRequested = parsed?.Count ?? 0;
+                if (parsed == null || parsed.Count == 0)
+                {
+                    return FallbackToMinimal(exportData, diagnostics, "parse", "entries missing or invalid");
+                }
+
+                var instanceMap = new Dictionary<int, object>();
+                for (int i = 0; i < parsed.Count; i++)
+                {
+                    var entry = parsed[i];
+                    if (entry == null || entry.TypeId <= 0 || entry.InstanceId == 0)
+                    {
+                        return FallbackToMinimal(exportData, diagnostics, "parse", "entry typeId/instanceId invalid");
+                    }
+
+                    object created = null;
+                    try
+                    {
+                        var gen = IMKDuckov.Factory.TryGenerateByTypeId(entry.TypeId);
+                        if (gen.Ok) created = gen.Value;
+                    }
+                    catch { }
+
+                    if (created == null)
+                    {
+                        var inst = IMKDuckov.Factory.TryInstantiateByTypeId(entry.TypeId);
+                        if (inst.Ok) created = inst.Value;
+                    }
+
+                    if (created == null)
+                    {
+                        return FallbackToMinimal(exportData, diagnostics, "instantiate", "node creation failed for typeId=" + entry.TypeId);
+                    }
+
+                    instanceMap[entry.InstanceId] = created;
+                }
+
+                diagnostics.EntriesImported = instanceMap.Count;
+
+                foreach (var entry in parsed)
+                {
+                    if (!instanceMap.TryGetValue(entry.InstanceId, out var item) || item == null) continue;
+                    if (entry.Variables.Count <= 0) continue;
+
+                    var write = IMKDuckov.Write.TryWriteVariables(item, entry.Variables, overwrite: true);
+                    if (!write.Ok)
+                    {
+                        return FallbackToMinimal(exportData, diagnostics, "hydrate", write.Error ?? "variable write failed");
+                    }
+                }
+
+                foreach (var entry in parsed)
+                {
+                    if (!instanceMap.TryGetValue(entry.InstanceId, out var owner) || owner == null) continue;
+
+                    if (entry.Inventory.Count > 0)
+                    {
+                        var inventory = IMKDuckov.Inventory.GetInventory(owner);
+                        if (inventory == null)
+                        {
+                            return FallbackToMinimal(exportData, diagnostics, "connect.inventory", "inventory missing for owner instanceId=" + entry.InstanceId);
+                        }
+
+                        entry.Inventory.Sort((left, right) => left.Key.CompareTo(right.Key));
+                        foreach (var childRef in entry.Inventory)
+                        {
+                            if (!instanceMap.TryGetValue(childRef.Value, out var child) || child == null)
+                            {
+                                return FallbackToMinimal(exportData, diagnostics, "connect.inventory", "inventory child missing instanceId=" + childRef.Value);
+                            }
+
+                            if (!IMKDuckov.Inventory.AddAt(inventory, child, childRef.Key))
+                            {
+                                return FallbackToMinimal(exportData, diagnostics, "connect.inventory", "inventory add failed at index=" + childRef.Key);
+                            }
+                        }
+                    }
+
+                    if (entry.Slots.Count > 0)
+                    {
+                        foreach (var childRef in entry.Slots)
+                        {
+                            if (string.IsNullOrEmpty(childRef.Key)) continue;
+                            if (!instanceMap.TryGetValue(childRef.Value, out var child) || child == null)
+                            {
+                                return FallbackToMinimal(exportData, diagnostics, "connect.slot", "slot child missing instanceId=" + childRef.Value);
+                            }
+
+                            var plug = IMKDuckov.Write.TryPlugIntoSlot(owner, childRef.Key, child);
+                            if (!plug.Ok)
+                            {
+                                return FallbackToMinimal(exportData, diagnostics, "connect.slot", plug.Error ?? "slot plug failed: " + childRef.Key);
+                            }
+                        }
+                    }
+                }
+
+                diagnostics.ImportMode = "tree";
+                diagnostics.FallbackUsed = false;
+                diagnostics.FallbackStage = string.Empty;
+                diagnostics.FallbackReason = string.Empty;
+                var rootInstanceId = exportData.Value<int?>("rootInstanceId") ?? parsed[0].InstanceId;
+                var rootEntry = parsed.Find(e => e.InstanceId == rootInstanceId) ?? parsed[0];
+                return instanceMap.TryGetValue(rootEntry.InstanceId, out var root) && root != null
+                    ? RichResult<object>.Success(root)
+                    : FallbackToMinimal(exportData, diagnostics, "finalize", "root resolve failed");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("TreeData tree import failed", ex);
+                return FallbackToMinimal(exportData, diagnostics, "exception", ex.Message);
+            }
+        }
+
+        private static RichResult<object> FallbackToMinimal(JObject exportData, TreeImportDiagnostics diagnostics, string stage, string reason)
+        {
+            if (diagnostics != null)
+            {
+                diagnostics.ImportMode = "minimal";
+                diagnostics.FallbackUsed = true;
+                diagnostics.FallbackStage = stage ?? string.Empty;
+                diagnostics.FallbackReason = reason ?? string.Empty;
+            }
+
+            return TryImportMinimal(exportData);
+        }
+
         /// <summary>
         /// 基于引擎的 ItemTreeData.InstantiateAsync 重建整棵子树。
         /// </summary>
         /// <param name="source">源物品。</param>
         /// <returns>成功返回新物品。</returns>
         public static RichResult<object> TryCloneFromSource(object source)
+        {
+            var request = new RestoreRequest
+            {
+                Source = source,
+                SourceKind = RestoreSourceKind.VanillaTreeData,
+                Target = null,
+                TargetMode = RestoreTargetMode.DetachedTree,
+                Strategy = CloneStrategy.TreeData,
+                VariableMergeMode = VariableMergeMode.None,
+                CopyTags = false,
+                AllowDegraded = false,
+                PublishEvents = false,
+                RefreshUI = false,
+                MarkDirty = false,
+                DiagnosticsEnabled = false,
+                CallerTag = "treedata.clone",
+            };
+
+            var restore = DuckovTreeRestoreOrchestrator.Shared.Execute(request);
+            if (!restore.Ok || restore.Value == null) return RichResult<object>.Fail(restore.Code, restore.Error);
+            return restore.Value.RootItem != null
+                ? RichResult<object>.Success(restore.Value.RootItem)
+                : RichResult<object>.Fail(ErrorCode.OperationFailed, "restore root null");
+        }
+
+        internal static RichResult<object> TryInstantiateTreeFromSource(object source)
         {
             try
             {
@@ -346,7 +538,79 @@ namespace ItemModKit.Adapters.Duckov
                 var newItem = AwaitUniTask(task);
                 return (newItem != null) ? RichResult<object>.Success(newItem) : RichResult<object>.Fail(ErrorCode.OperationFailed, "InstantiateAsync null");
             }
-            catch (Exception ex) { Log.Error("TryCloneFromSource failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
+            catch (Exception ex) { Log.Error("TryInstantiateTreeFromSource failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
+        }
+
+        private static List<ImportedTreeEntry> ParseImportedEntries(JObject exportData)
+        {
+            var entries = exportData?["entries"] as JArray;
+            if (entries == null || entries.Count == 0) return null;
+
+            var result = new List<ImportedTreeEntry>();
+            foreach (var token in entries)
+            {
+                if (!(token is JObject entryObject)) continue;
+                var entry = new ImportedTreeEntry
+                {
+                    InstanceId = entryObject.Value<int?>("instanceId") ?? 0,
+                    TypeId = entryObject.Value<int?>("typeId") ?? 0,
+                };
+
+                if (entry.InstanceId == 0 || entry.TypeId <= 0) return null;
+
+                if (entryObject["vars"] is JArray vars)
+                {
+                    foreach (var varToken in vars)
+                    {
+                        if (!(varToken is JObject varObject)) continue;
+                        var key = varObject.Value<string>("k");
+                        if (string.IsNullOrEmpty(key)) continue;
+                        if (varObject.TryGetValue("v", out var valueToken))
+                        {
+                            entry.Variables.Add(new KeyValuePair<string, object>(key, ConvertJTokenValue(valueToken)));
+                        }
+                    }
+                }
+
+                if (entryObject["slots"] is JArray slots)
+                {
+                    foreach (var slotToken in slots)
+                    {
+                        if (!(slotToken is JObject slotObject)) continue;
+                        var slotKey = slotObject.Value<string>("slot");
+                        var childInstanceId = slotObject.Value<int?>("instanceId") ?? 0;
+                        if (!string.IsNullOrEmpty(slotKey) && childInstanceId != 0)
+                        {
+                            entry.Slots.Add(new KeyValuePair<string, int>(slotKey, childInstanceId));
+                        }
+                    }
+                }
+
+                if (entryObject["inventory"] is JArray inventory)
+                {
+                    foreach (var inventoryToken in inventory)
+                    {
+                        if (!(inventoryToken is JObject inventoryObject)) continue;
+                        var position = inventoryObject.Value<int?>("position") ?? -1;
+                        var childInstanceId = inventoryObject.Value<int?>("instanceId") ?? 0;
+                        if (position >= 0 && childInstanceId != 0)
+                        {
+                            entry.Inventory.Add(new KeyValuePair<int, int>(position, childInstanceId));
+                        }
+                    }
+                }
+
+                result.Add(entry);
+            }
+
+            return result.Count > 0 ? result : null;
+        }
+
+        private static object ConvertJTokenValue(JToken token)
+        {
+            if (token == null) return null;
+            if (token is JValue value) return value.Value;
+            return token.ToString(Newtonsoft.Json.Formatting.None);
         }
 
         /// <summary>
@@ -354,20 +618,10 @@ namespace ItemModKit.Adapters.Duckov
         /// </summary>
         /// <param name="source">源物品。</param>
         /// <returns>成功返回新物品；失败携带错误码。</returns>
+        [Obsolete("Use IMKDuckov.Clone.TryCloneToInventory targeting character.", false)]
         public static RichResult<object> TryCloneIntoPlayerInventory(object source)
         {
-            var opts = new ClonePipelineOptions
-            {
-                Strategy = CloneStrategy.TreeData,
-                VariableMerge = VariableMergeMode.OnlyMissing,
-                CopyTags = true,
-                Target = "character",
-                RefreshUI = true,
-                Diagnostics = false
-            };
-            var r = IMKDuckov.Clone.TryCloneToInventory(source, opts);
-            if (!r.Ok || r.Value == null) return RichResult<object>.Fail(r.Code, r.Error);
-            return RichResult<object>.Success(r.Value.NewItem);
+            return ForwardCompatTreeClone(source, "character", diagnostics: false);
         }
 
         /// <summary>
@@ -379,18 +633,7 @@ namespace ItemModKit.Adapters.Duckov
         [Obsolete("Use IMKDuckov.Clone.TryCloneToInventory (bus-oriented pipeline).", false)]
         public static RichResult<object> TryCloneIntoInventoryAdvanced(object source, string target = null)
         {
-            var opts = new ClonePipelineOptions
-            {
-                Strategy = CloneStrategy.TreeData,
-                VariableMerge = VariableMergeMode.OnlyMissing,
-                CopyTags = true,
-                Target = string.IsNullOrEmpty(target) ? "character" : target,
-                RefreshUI = true,
-                Diagnostics = false
-            };
-            var r = IMKDuckov.Clone.TryCloneToInventory(source, opts);
-            if (!r.Ok || r.Value == null) return RichResult<object>.Fail(r.Code, r.Error);
-            return RichResult<object>.Success(r.Value.NewItem);
+            return ForwardCompatTreeClone(source, target, diagnostics: false);
         }
 
         /// <summary>
@@ -403,22 +646,40 @@ namespace ItemModKit.Adapters.Duckov
         [Obsolete("Use IMKDuckov.Clone.TryCloneToInventory (bus-oriented pipeline).", false)]
         public static (RichResult<object> result, Dictionary<string, object> diag) TryCloneIntoInventoryAdvancedWithDiag(object source, string target = null, int sampleLimit = 32)
         {
-            var opts = new ClonePipelineOptions
+            var opts = CreateCompatTreeCloneOptions(target, diagnostics: true);
+            var r = IMKDuckov.Clone.TryCloneToInventory(source, opts);
+            var diag = r.Ok && r.Value != null ? (r.Value.Diagnostics ?? new Dictionary<string, object>()) : new Dictionary<string, object>();
+            diag["strategyRequested"] = "TreeData";
+            diag["targetRequested"] = opts.Target;
+            diag["sampleLimit"] = sampleLimit;
+            if (!r.Ok) diag["error"] = r.Error ?? "clone failed";
+            return (ToCompatCloneResult(r), diag);
+        }
+
+        private static ClonePipelineOptions CreateCompatTreeCloneOptions(string target, bool diagnostics)
+        {
+            return new ClonePipelineOptions
             {
                 Strategy = CloneStrategy.TreeData,
                 VariableMerge = VariableMergeMode.OnlyMissing,
                 CopyTags = true,
                 Target = string.IsNullOrEmpty(target) ? "character" : target,
                 RefreshUI = true,
-                Diagnostics = true
+                Diagnostics = diagnostics
             };
+        }
+
+        private static RichResult<object> ForwardCompatTreeClone(object source, string target, bool diagnostics)
+        {
+            var opts = CreateCompatTreeCloneOptions(target, diagnostics);
             var r = IMKDuckov.Clone.TryCloneToInventory(source, opts);
-            var diag = r.Ok && r.Value != null ? (r.Value.Diagnostics ?? new Dictionary<string, object>()) : new Dictionary<string, object>();
-            diag["strategyRequested"] = "TreeData";
-            diag["targetRequested"] = opts.Target;
-            if (!r.Ok) diag["error"] = r.Error ?? "clone failed";
-            var res = r.Ok && r.Value != null ? RichResult<object>.Success(r.Value.NewItem) : RichResult<object>.Fail(r.Code, r.Error);
-            return (res, diag);
+            return ToCompatCloneResult(r);
+        }
+
+        private static RichResult<object> ToCompatCloneResult(RichResult<ClonePipelineResult> result)
+        {
+            if (!result.Ok || result.Value == null) return RichResult<object>.Fail(result.Code, result.Error);
+            return RichResult<object>.Success(result.Value.NewItem);
         }
 
         // helpers restored after refactor

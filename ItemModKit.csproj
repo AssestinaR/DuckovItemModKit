@@ -7,20 +7,29 @@
  <AssemblyName>ItemModKit</AssemblyName>
  <RootNamespace>ItemModKit</RootNamespace>
  <DuckovPath>D:\SteamLibrary\steamapps\common\Escape from Duckov</DuckovPath>
+ <ModHarmonyPath>D:\SteamLibrary\steamapps\common\Escape from Duckov\Duckov_Data\Mods\ItemModKit\0Harmony.dll</ModHarmonyPath>
  <DefaultItemExcludes>$(DefaultItemExcludes);bak\**;legacy\**</DefaultItemExcludes>
  </PropertyGroup>
  <ItemGroup>
 	<Reference Include="$(DuckovPath)\Duckov_Data\Managed\TeamSoda.*" Private="False"/>
 	<Reference Include="$(DuckovPath)\Duckov_Data\Managed\ItemStatsSystem.dll" Private="False"/>
+	<Reference Include="0Harmony" Condition="Exists('$(DuckovPath)\Duckov_Data\Managed\0Harmony.dll')">
+	  <HintPath>$(DuckovPath)\Duckov_Data\Managed\0Harmony.dll</HintPath>
+	  <Private>False</Private>
+	</Reference>
+	<Reference Include="0Harmony" Condition="!Exists('$(DuckovPath)\Duckov_Data\Managed\0Harmony.dll') And Exists('$(ModHarmonyPath)')">
+	  <HintPath>$(ModHarmonyPath)</HintPath>
+	  <Private>False</Private>
+	</Reference>
 	<Reference Include="$(DuckovPath)\Duckov_Data\Managed\Newtonsoft.Json.dll" Private="False"/>
 	<Reference Include="$(DuckovPath)\Duckov_Data\Managed\Unity*" Private="False"/>
 	<Reference Include="$(DuckovPath)\Duckov_Data\Managed\SodaLocalization.dll" Private="False"/>
     <None Include="docs\**" />
  </ItemGroup>
  <ItemGroup>
-	 <Compile Remove="bak\**\*.cs;legacy\**\*.cs" />
-	 <EmbeddedResource Remove="bak\**;legacy\**" />
-	 <None Include="bak\**;legacy\**">
+	 <Compile Remove="bak\**\*.cs;legacy\**\*.cs;docs\**\*.cs" />
+	 <EmbeddedResource Remove="bak\**;legacy\**;docs\**" />
+	 <None Include="bak\**;legacy\**;docs\**">
 		<Visible>false</Visible>
 	 </None>
  </ItemGroup>

@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System;
+using HarmonyLib;
 
 namespace ItemModKit
 {
@@ -9,6 +10,8 @@ namespace ItemModKit
     /// </summary>
     public class ModBehaviour : Duckov.Modding.ModBehaviour
     {
+        private static bool s_patchesInstalled;
+
         /// <summary>
         /// Unity Awake：初始化事件桥。
         /// </summary>
@@ -16,6 +19,16 @@ namespace ItemModKit
         {
             // 初始化事件桥
             try { Adapters.Duckov.DuckovEventBridge.Initialize(); } catch { }
+            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Initialize(); } catch { }
+            if (!s_patchesInstalled)
+            {
+                try
+                {
+                    new Harmony("mod.itemmodkit.persistence").PatchAll();
+                    s_patchesInstalled = true;
+                }
+                catch { }
+            }
         }
 
         /// <summary>
@@ -24,6 +37,7 @@ namespace ItemModKit
         void OnDestroy()
         {
             try { Adapters.Duckov.IMKDuckov.FlushAllDirty("scene unload"); } catch { }
+            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Dispose(); } catch { }
             try { Adapters.Duckov.DuckovEventBridge.Dispose(); } catch { }
         }
 
@@ -48,7 +62,7 @@ namespace ItemModKit
                 {
                     if (Time.frameCount % 300 == 0)
                     {
-                        try { if (Adapters.Duckov.IMKDuckov.UISelection.TryGetCurrentItem(out var _)) events.HintActive(2f); } catch { }
+                        try { if (Adapters.Duckov.IMKDuckov.TryGetCurrentSelectedHandle() != null) events.HintActive(2f); } catch { }
                     }
                     events.Tick();
                 }
@@ -56,6 +70,12 @@ namespace ItemModKit
                 if (world != null)
                 {
                     world.Tick();
+                }
+
+                var persistence = Adapters.Duckov.IMKDuckov.PersistenceScheduler;
+                if (persistence != null)
+                {
+                    persistence.Tick(null);
                 }
             }
             catch { }

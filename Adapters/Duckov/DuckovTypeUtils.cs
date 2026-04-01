@@ -39,13 +39,56 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (obj == null) return;
-                var setter = DuckovReflectionCache.GetSetter(obj.GetType(), name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (setter != null) { setter(obj, val); return; }
-                // fallback (rare)
-                var p = DuckovReflectionCache.GetProp(obj.GetType(), name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                p?.SetValue(obj, val, null);
+                TrySetMember(obj, new[] { name }, val);
             }
             catch { }
+        }
+        internal static bool TrySetMember(object obj, string[] names, object val)
+        {
+            try
+            {
+                if (obj == null || names == null || names.Length == 0) return false;
+                var type = obj.GetType();
+                foreach (var name in names)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    var setter = DuckovReflectionCache.GetSetter(type, name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (setter != null)
+                    {
+                        try { setter(obj, ConvertForAssignment(val, DuckovReflectionCache.GetProp(type, name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.PropertyType)); return true; } catch { }
+                    }
+
+                    var prop = DuckovReflectionCache.GetProp(type, name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (prop != null)
+                    {
+                        try { prop.SetValue(obj, ConvertForAssignment(val, prop.PropertyType), null); return true; } catch { }
+                    }
+
+                    var field = DuckovReflectionCache.GetField(type, name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                ?? DuckovReflectionCache.GetField(type, name.ToLowerInvariant(), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field != null && !field.IsInitOnly)
+                    {
+                        try { field.SetValue(obj, ConvertForAssignment(val, field.FieldType)); return true; } catch { }
+                    }
+
+                    foreach (var backingField in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        try
+                        {
+                            var backingName = backingField.Name;
+                            if (backingField.IsInitOnly) continue;
+                            if (backingName.IndexOf("k__BackingField", StringComparison.Ordinal) < 0) continue;
+                            if (backingName.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                            backingField.SetValue(obj, ConvertForAssignment(val, backingField.FieldType));
+                            return true;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
         internal static object GetMaybe(object obj, string[] names)
         {
@@ -82,6 +125,23 @@ namespace ItemModKit.Adapters.Duckov
         {
             try { if (v == null) return false; if (v is bool b) return b; var s = v.ToString(); if (string.Equals(s, "true", StringComparison.OrdinalIgnoreCase)) return true; if (string.Equals(s, "1")) return true; } catch { }
             return false;
+        }
+
+        private static object ConvertForAssignment(object value, Type targetType)
+        {
+            try
+            {
+                if (targetType == null || value == null) return value;
+                var effectiveType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+                if (effectiveType.IsInstanceOfType(value)) return value;
+                if (effectiveType.IsEnum)
+                {
+                    if (value is string enumName) return Enum.Parse(effectiveType, enumName, true);
+                    return Enum.ToObject(effectiveType, value);
+                }
+                return Convert.ChangeType(value, effectiveType);
+            }
+            catch { return value; }
         }
 
         // Stable Unity instance id when available; otherwise fallback to GetHashCode

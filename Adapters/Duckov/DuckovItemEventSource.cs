@@ -37,7 +37,6 @@ namespace ItemModKit.Adapters.Duckov
         private float _lastPublishAt;
         private readonly System.Collections.Generic.Dictionary<int, (float ts, string kind, object item)> _pending = new System.Collections.Generic.Dictionary<int, (float ts, string kind, object item)>();
 
-        private readonly IItemQuery _query;
         private readonly IItemAdapter _item;
         private readonly System.Collections.Generic.HashSet<int> _knownIds = new System.Collections.Generic.HashSet<int>();
         private readonly System.Collections.Generic.Dictionary<int, int> _hash = new System.Collections.Generic.Dictionary<int, int>();
@@ -48,9 +47,15 @@ namespace ItemModKit.Adapters.Duckov
         /// <summary>
         /// 构造函数：创建一个物品事件源并关联查询与物品访问接口。
         /// </summary>
-        /// <param name="query">查询接口（用于枚举物品集合）。</param>
         /// <param name="item">物品适配器（用于读取核心字段与变量）。</param>
-        public DuckovItemEventSource(IItemQuery query, IItemAdapter item) { _query = query; _item = item; }
+        [Obsolete("旧查询参数已被忽略。请改用 DuckovItemEventSource(IItemAdapter)。", false)]
+        public DuckovItemEventSource(IItemQuery query, IItemAdapter item) : this(item) { }
+
+        /// <summary>
+        /// 构造函数：创建一个物品事件源并关联物品访问接口。
+        /// </summary>
+        /// <param name="item">物品适配器（用于读取核心字段与变量）。</param>
+        public DuckovItemEventSource(IItemAdapter item) { _item = item; }
 
         /// <summary>进入外部事件模式（引用计数，可嵌套）。</summary>
         public void BeginExternalMode() { if (++_externalModeRefs < 0) _externalModeRefs = 1; }
@@ -208,7 +213,7 @@ namespace ItemModKit.Adapters.Duckov
                 if (_enumerationCursor == 0)
                 {
                     _enumBuffer.Clear();
-                    foreach (var it in _query.EnumerateAllInventories()) _enumBuffer.Add(it);
+                    foreach (var it in IMKDuckov.EnumerateAllKnownItems()) _enumBuffer.Add(it);
                 }
             }
             catch { _enumBuffer.Clear(); }

@@ -126,9 +126,9 @@ namespace ItemModKit.Core
                     {
                         foreach (var s in statRes.Value.Entries)
                         {
-                            var rEnsure = writer.TryEnsureStat(target, s.Key, s.Value);
+                            var rEnsure = writer.TryEnsureStat(target, s.Key, s.BaseValue);
                             if (!rEnsure.Ok) return rEnsure;
-                            var rSet = writer.TrySetStatValue(target, s.Key, s.Value);
+                            var rSet = writer.TrySetStatValue(target, s.Key, s.BaseValue);
                             if (!rSet.Ok) return rSet;
                         }
                     }

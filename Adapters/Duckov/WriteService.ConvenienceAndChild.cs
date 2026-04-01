@@ -9,7 +9,18 @@ namespace ItemModKit.Adapters.Duckov
         // Convenience setters (stack/durability/inspection)
         public RichResult TrySetStackCount(object item, int count)
         {
-            try { return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Count, count) }, true); }
+            try
+            {
+                if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "StackCount", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (setter != null)
+                {
+                    setter(item, count);
+                    return RichResult.Success();
+                }
+
+                return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Count, count) }, true);
+            }
             catch (Exception ex) { Log.Error("TrySetStackCount failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
         public RichResult TrySetMaxStack(object item, int max)
@@ -26,12 +37,34 @@ namespace ItemModKit.Adapters.Duckov
         }
         public RichResult TrySetDurability(object item, float value)
         {
-            try { return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Durability, value) }, true); }
+            try
+            {
+                if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Durability", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (setter != null)
+                {
+                    setter(item, value);
+                    return RichResult.Success();
+                }
+
+                return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Durability, value) }, true);
+            }
             catch (Exception ex) { Log.Error("TrySetDurability failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
         public RichResult TrySetMaxDurability(object item, float value)
         {
-            try { return TryWriteConstants(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Constant.MaxDurability, value) }, true); }
+            try
+            {
+                if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), EngineKeys.Constant.MaxDurability, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (setter != null)
+                {
+                    setter(item, value);
+                    return RichResult.Success();
+                }
+
+                return TryWriteConstants(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Constant.MaxDurability, value) }, true);
+            }
             catch (Exception ex) { Log.Error("TrySetMaxDurability failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
         public RichResult TrySetDurabilityLoss(object item, float value)
@@ -41,7 +74,18 @@ namespace ItemModKit.Adapters.Duckov
         }
         public RichResult TrySetInspected(object item, bool inspected)
         {
-            try { return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Inspected, inspected) }, true); }
+            try
+            {
+                if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
+                var setter = DuckovReflectionCache.GetSetter(item.GetType(), EngineKeys.Property.Inspected, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (setter != null)
+                {
+                    setter(item, inspected);
+                    return RichResult.Success();
+                }
+
+                return TryWriteVariables(item, new[] { new System.Collections.Generic.KeyValuePair<string, object>(EngineKeys.Variable.Inspected, inspected) }, true);
+            }
             catch (Exception ex) { Log.Error("TrySetInspected failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
         public RichResult TrySetInspecting(object item, bool inspecting)

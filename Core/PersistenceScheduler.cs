@@ -16,19 +16,38 @@ namespace ItemModKit.Core
     /// </summary>
     internal sealed partial class PersistenceScheduler : IPersistenceScheduler
     {
+        // 单个待刷条目，按稳定 ID 聚合脏标记与时间窗口。
         private sealed class Entry
         {
+            // 目标运行时对象。
             public object Item;
+
+            // 当前累积的脏类别位。
             public DirtyKind Dirty;
+
+            // 首次标脏时间，用于最大延迟判定。
             public float FirstDirtyAt;
+
+            // 最近一次标脏时间，用于普通延迟窗口判定。
             public float LastDirtyAt;
+
+            // 是否要求尽快刷新。
             public bool Immediate;
         }
 
+        // 运行时读取入口。
         private readonly IItemAdapter _item;
+
+        // 持久化写入入口。
         private readonly IItemPersistence _persist;
+
+        // 抓取快照的回调，由外部注入以降低调度器对快照实现的耦合。
         private readonly Func<object, ItemSnapshot> _capture;
+
+        // 按稳定 ID 聚合的待刷条目表。
         private readonly Dictionary<int, Entry> _entries = new Dictionary<int, Entry>();
+
+        // 刷新顺序表，便于 Tick 按稳定顺序限流处理。
         private readonly List<int> _flushOrder = new List<int>();
 
         /// <summary>同一物品最后一次变更后的延迟秒数，超过则触发写回。</summary>
@@ -38,6 +57,7 @@ namespace ItemModKit.Core
         /// <summary>自第一次标脏起的最大延迟，超过则强制写回。</summary>
         public float MaxDelaySeconds { get; set; } = PersistenceSettings.Current.MaxDelaySeconds;
 
+        // 当前 EmbeddedJson/extra block 的格式版本。
         private const int CurrentFormatVersion = 1;
 
         private long _processedTotal;
@@ -46,6 +66,10 @@ namespace ItemModKit.Core
         /// <summary>启动以来累计处理的物品数量。</summary>
         public long ProcessedTotal => _processedTotal;
 
+        /// <summary>
+        /// 构造持久化调度器。
+        /// 调用方负责提供读取适配器、持久化写入器和快照抓取函数。
+        /// </summary>
         public PersistenceScheduler(IItemAdapter item, IItemPersistence persist, Func<object, ItemSnapshot> capture)
         {
             _item = item; _persist = persist; _capture = capture;
@@ -75,7 +99,7 @@ namespace ItemModKit.Core
             catch { }
         }
 
-        /// <summary>立即刷新某个物品（如果在队列中）。</summary>
+        /// <summary>立即刷新某个物品；如果目标不在队列中则直接忽略。</summary>
         public void Flush(object item, bool force = false)
         {
             if (item == null) return;
@@ -104,6 +128,7 @@ namespace ItemModKit.Core
 
         /// <summary>
         /// 将所有入队项标记为 Immediate，后续由 Tick 在每帧中分批处理，避免一次性卡顿。
+        /// 这不是同步 FlushAll，而是“尽快在后续若干帧内刷完”。
         /// </summary>
         public void RequestFlushAllDeferred()
         {
@@ -120,6 +145,7 @@ namespace ItemModKit.Core
 
         /// <summary>
         /// 每帧调用：根据时间窗口与 Immediate 标记，按 MaxPerTick 的上限处理刷新。
+        /// now 为 null 时使用运行时时钟；测试或离线驱动场景可以显式传入时间戳。
         /// </summary>
         public void Tick(float? now = null)
         {
@@ -145,8 +171,14 @@ namespace ItemModKit.Core
             catch { }
         }
 
+        // 复用的 extra block 容器，降低高频刷新时的临时分配。
         private static readonly Dictionary<string, object> s_extraReuse = new Dictionary<string, object>();
+        private const string InternalPersistenceVariablePrefix = "IMK_";
 
+        /// <summary>
+        /// 执行单条刷新。
+        /// 这里会抓取快照、构建 ItemMeta、选择性嵌入 extra block，并最终写回持久化层。
+        /// </summary>
         private void InternalFlush(int id, Entry e, bool force)
         {
             try
@@ -160,15 +192,24 @@ namespace ItemModKit.Core
                 meta.FormatVersion = CurrentFormatVersion;
                 s_extraReuse.Clear();
                 bool wantExtra = PersistenceSettings.Current.EmbedExtra;
-                bool anyExtra = false;
-                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Variables)) { s_extraReuse["variables"] = snap.Variables; anyExtra = true; }
-                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Tags)) { s_extraReuse["tags"] = snap.Tags; anyExtra = true; }
-                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Modifiers)) { s_extraReuse["modifiers"] = snap.Modifiers; anyExtra = true; }
-                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Slots)) { s_extraReuse["slots"] = snap.Slots; anyExtra = true; }
-                if (wantExtra && anyExtra)
+                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Variables))
+                {
+                    var filteredVariables = FilterExtraVariables(snap.Variables);
+                    if (filteredVariables.Length > 0)
+                    {
+                        s_extraReuse["variables"] = filteredVariables;
+                    }
+                }
+                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Tags)) { s_extraReuse["tags"] = snap.Tags; }
+                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Modifiers)) { s_extraReuse["modifiers"] = snap.Modifiers; }
+                if (wantExtra && e.Dirty.HasFlag(DirtyKind.Slots)) { s_extraReuse["slots"] = snap.Slots; }
+                if (wantExtra)
                 {
                     try { ItemStateExtensions.Contribute(e.Item, snap, e.Dirty, s_extraReuse); } catch { }
-                    try { ItemStateExtensions.Enrich(e.Item, meta, s_extraReuse); } catch { }
+                    if (s_extraReuse.Count > 0)
+                    {
+                        try { ItemStateExtensions.Enrich(e.Item, meta, s_extraReuse); } catch { }
+                    }
                 }
                 // embed only if requested
                 if (wantExtra && s_extraReuse.Count > 0)
@@ -224,6 +265,34 @@ namespace ItemModKit.Core
             }
         }
 
+        private static VariableEntry[] FilterExtraVariables(VariableEntry[] variables)
+        {
+            if (variables == null || variables.Length == 0)
+            {
+                return Array.Empty<VariableEntry>();
+            }
+
+            var kept = new List<VariableEntry>(variables.Length);
+            for (int index = 0; index < variables.Length; index++)
+            {
+                var entry = variables[index];
+                if (string.IsNullOrEmpty(entry.Key))
+                {
+                    continue;
+                }
+
+                if (entry.Key.StartsWith(InternalPersistenceVariablePrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                kept.Add(entry);
+            }
+
+            return kept.Count > 0 ? kept.ToArray() : Array.Empty<VariableEntry>();
+        }
+
+        /// <summary>为 EmbeddedJson 计算校验和；失败时返回 null。</summary>
         private static string ComputeChecksum(string json)
         {
             try
@@ -238,13 +307,17 @@ namespace ItemModKit.Core
             catch { return null; }
         }
 
+        /// <summary>获取当前调度时钟；优先使用 Unity 的 unscaledTime，失败时回退到 UTC 秒数。</summary>
         private static float Now()
         {
             try { return UnityEngine.Time.unscaledTime; } catch { return (float)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds; }
         }
     }
 
-    // Minimal CRC32 implementation (polynomial 0xEDB88320)
+    /// <summary>
+    /// 最小 CRC32 实现。
+    /// 仅用于为 EmbeddedJson 生成轻量校验和，不追求通用哈希库级别的可配置性。
+    /// </summary>
     internal sealed class Crc32 : HashAlgorithm
     {
         private const uint Polynomial = 0xEDB88320u;

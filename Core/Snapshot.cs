@@ -4,34 +4,45 @@ using System.Collections.Generic;
 namespace ItemModKit.Core
 {
     /// <summary>
-    /// 物品快照：捕获核心字段、变量、修饰、插槽与标签用于持久化或诊断。
+    /// 物品快照：捕获某个时刻的核心字段、变量、修饰、插槽与标签。
+    /// 它是只读快照，不会随着原始运行时对象继续变化。
     /// </summary>
     [Serializable]
     public sealed class ItemSnapshot
     {
         /// <summary>显示名称。</summary>
         public string Name;
-        /// <summary>原始名称。</summary>
+
+        /// <summary>原始或底层名称；通常比 Name 更接近运行时真实值。</summary>
         public string NameRaw;
+
         /// <summary>类型 ID。</summary>
         public int TypeId;
+
         /// <summary>品质。</summary>
         public int Quality;
-        /// <summary>显示品质。</summary>
+
+        /// <summary>显示品质；用于 UI 或显示层的品质值。</summary>
         public int DisplayQuality;
+
         /// <summary>价值。</summary>
         public int Value;
+
         /// <summary>标签集合。</summary>
         public string[] Tags = Array.Empty<string>();
+
         /// <summary>变量集合。</summary>
         public VariableEntry[] Variables = Array.Empty<VariableEntry>();
-        /// <summary>修饰集合。</summary>
+
+        /// <summary>修饰器集合。</summary>
         public ModifierEntry[] Modifiers = Array.Empty<ModifierEntry>();
-        /// <summary>插槽集合。</summary>
+
+        /// <summary>插槽集合；只记录槽位快照，不递归展开槽位内容的整棵树。</summary>
         public SlotEntry[] Slots = Array.Empty<SlotEntry>();
 
         /// <summary>
         /// 捕获当前物品的核心状态（不含 Effects）。
+        /// 当 adapter 或 item 为空时，返回空快照而不是抛错。
         /// </summary>
         /// <param name="adapter">物品适配器。</param>
         /// <param name="item">目标物品。</param>
@@ -56,13 +67,13 @@ namespace ItemModKit.Core
     }
 
     /// <summary>
-    /// 快照扩展：辅助格式化输出内容便于诊断。
+    /// 快照扩展：辅助把快照格式化为便于日志和诊断阅读的文本。
     /// </summary>
     public static class ItemSnapshotExtensions
     {
         /// <summary>格式化输出快照内容，便于诊断。</summary>
         /// <param name="s">目标快照。</param>
-        /// <returns>多行字符串。</returns>
+        /// <returns>多行字符串；快照为空时返回 &lt;null&gt;。</returns>
         public static string ToPrettyString(this ItemSnapshot s)
         {
             if (s == null) return "<null>";

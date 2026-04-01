@@ -8,13 +8,13 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal static class DuckovMigration
     {
-        // Lightweight migrator: ensure meta exists and essential fields are filled; upgrade MetaVersion
+        // 轻量迁移入口：确保 meta 存在且关键字段完整，必要时提升 MetaVersion。
         public static bool EnsureMigrated(IItemAdapter itemApi, IItemPersistence persist, object item)
         {
             if (itemApi == null || persist == null || item == null) return false;
             try
             {
-                // Try read existing meta
+                // 先尝试读取已有 meta。
                 if (!persist.TryExtractMeta(item, out var m) || m == null)
                 {
                     var snap = ItemSnapshot.Capture(itemApi, item);
@@ -24,7 +24,8 @@ namespace ItemModKit.Adapters.Duckov
                     persist.RecordMeta(item, meta, writeVariables: true);
                     return true;
                 }
-                // Fill missing fields and bump version if needed
+
+                // 补齐缺失字段，并在需要时提升版本号。
                 bool changed = false;
                 if (m.MetaVersion <= 0) { m.MetaVersion = 1; changed = true; }
                 if (string.IsNullOrEmpty(m.NameKey)) { m.NameKey = itemApi.GetDisplayNameRaw(item) ?? itemApi.GetName(item); changed = true; }

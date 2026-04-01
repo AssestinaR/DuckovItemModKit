@@ -87,16 +87,33 @@ namespace ItemModKit.Adapters.Duckov
             if (item == null) return false;
             try
             {
-                if (!TryExtractMeta(item, out var m) || m == null) return false;
-                ApplyBasic(item, m);
-                _item.ReapplyModifiers(item);
-                int id = DuckovTypeUtils.GetStableId(item);
-                if (!s_extensionsApplied.Contains(id))
+                var applied = false;
+                var hasMeta = TryExtractMeta(item, out var m) && m != null;
+                if (hasMeta)
                 {
-                    try { ItemStateExtensions.TryApply(item, m); } catch { }
-                    s_extensionsApplied.Add(id);
+                    ApplyBasic(item, m);
+                    _item.ReapplyModifiers(item);
+                    int id = DuckovTypeUtils.GetStableId(item);
+                    if (!s_extensionsApplied.Contains(id))
+                    {
+                        try { ItemStateExtensions.TryApply(item, m); } catch { }
+                        s_extensionsApplied.Add(id);
+                    }
+
+                    applied = true;
                 }
-                return true;
+
+                if (DuckovSlotProvisioningDraft.TryApplyPersistedDefinitions(item))
+                {
+                    applied = true;
+                }
+
+                if (DuckovResourceProvisioningDraft.TryApplyPersistedDefinition(item))
+                {
+                    applied = true;
+                }
+
+                return applied;
             }
             catch { return false; }
         }
@@ -124,6 +141,8 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (HasEmbedded(item)) return true;
+                if (DuckovSlotProvisioningDraft.HasPersistedDefinitions(item)) return true;
+                if (DuckovResourceProvisioningDraft.HasPersistedDefinition(item)) return true;
                 foreach (var k in new[] { VarMeta, VarOwner, VarName, VarDesc, VarTypeId, VarQuality, VarDisplayQuality, VarValue })
                 {
                     var v = _item.GetVariable(item, k); if (v != null) return true;

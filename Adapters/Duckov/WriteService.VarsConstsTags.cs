@@ -28,14 +28,14 @@ namespace ItemModKit.Adapters.Duckov
                         bool existed = existedVal != null;
                         snapshot.Add((kv.Key, existedVal, existed));
                         if (!overwrite && existed) continue;
-                        _item.SetVariable(item, kv.Key, kv.Value, false);
+                        _item.SetVariable(item, kv.Key, kv.Value, true);
                     }
                 }
                 catch
                 {
                     foreach (var s in snapshot)
                     {
-                        if (s.existed) _item.SetVariable(item, s.key, s.value, false);
+                        if (s.existed) _item.SetVariable(item, s.key, s.value, true);
                         else _item.RemoveVariable(item, s.key);
                     }
                     throw;

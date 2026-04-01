@@ -7,25 +7,28 @@ namespace ItemModKit.Adapters.Duckov.Locator
 {
     internal sealed class DuckovItemQueryV2 : IItemQuery
     {
-        // Predicates
+        // 当前累积的查询谓词。
         private readonly List<Func<IItemHandle,bool>> _preds = new List<Func<IItemHandle,bool>>();
-        // Indexes
+
+        // 常用索引，加速 type/inventory/tag/name 等路径的过滤。
         private readonly List<IItemHandle> _all = new List<IItemHandle>();
         private readonly Dictionary<int,List<IItemHandle>> _byType = new Dictionary<int,List<IItemHandle>>();
         private readonly Dictionary<object,List<IItemHandle>> _byInventory = new Dictionary<object,List<IItemHandle>>();
         private readonly Dictionary<string,List<IItemHandle>> _byTag = new Dictionary<string,List<IItemHandle>>(StringComparer.OrdinalIgnoreCase);
         private readonly List<IItemHandle> _equipped = new List<IItemHandle>();
-        // Caches
+
+        // 运行时缓存，减少 owner 链与名称检索的重复计算。
         private readonly Dictionary<IItemHandle,int> _depthCache = new Dictionary<IItemHandle,int>();
         private readonly Dictionary<IItemHandle,List<int?>> _ancestorChain = new Dictionary<IItemHandle,List<int?>>();
         private readonly Dictionary<string,List<IItemHandle>> _nameIndex = new Dictionary<string,List<IItemHandle>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string,List<IItemHandle>> _nameWordIndex = new Dictionary<string,List<IItemHandle>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string,List<IItemHandle>> _nameQueryCache = new Dictionary<string,List<IItemHandle>>(StringComparer.OrdinalIgnoreCase);
-        // Diagnostics
+
+        // 最近一次与累计查询诊断。
         internal long LastQueryTicks; internal int LastResultCount; internal int LastSourceSize; internal int LastPredicateCount;
         internal long TotalQueryTicks; internal int QueryCount; internal long MaxQueryTicks;
 
-        // Active filter state
+        // 当前激活的过滤状态，用于 SelectSource 做快速源集合收缩。
         private int? _filterTypeId; private string[] _filterTagsAll; private string[] _filterTagsAny; private string _filterNameContainsPart; private bool _hasEquippedFilter; private (int min,int max)? _depthRange;
 
         private static bool IsEquippedRaw(object raw)
@@ -36,7 +39,7 @@ namespace ItemModKit.Adapters.Duckov.Locator
         public void AddHandle(IItemHandle h)
         {
             if (h == null) return;
-            RemoveHandle(h); // ensure no duplicates
+            RemoveHandle(h); // 先移除旧记录，确保同一 handle 不会重复进入索引。
             var raw = h.TryGetRaw();
             if (!_all.Contains(h)) _all.Add(h);
             int tid = TryTypeId(h); if (tid != 0) { if (!_byType.TryGetValue(tid, out var list)) { list = new List<IItemHandle>(); _byType[tid] = list; } list.Add(h); }
@@ -131,7 +134,7 @@ namespace ItemModKit.Adapters.Duckov.Locator
         }
         public IItemQuery OwnedBy(IItemHandle ownerRoot)
         {
-            if (ownerRoot != null) _preds.Add(h => { if (h == null || !h.IsAlive) return false; if (_ancestorChain.TryGetValue(h, out var chain)) return chain.Contains(ownerRoot.InstanceId); // fallback dynamic
+            if (ownerRoot != null) _preds.Add(h => { if (h == null || !h.IsAlive) return false; if (_ancestorChain.TryGetValue(h, out var chain)) return chain.Contains(ownerRoot.InstanceId); // 缓存未命中时再走动态 owner 链回溯。
                 var cur = h; int guard = 0; while (cur != null && guard++ < 32) { if (cur.InstanceId == ownerRoot.InstanceId) return true; cur = IMKDuckov.Ownership.GetOwner(cur); } return false; });
             return this;
         }
@@ -172,7 +175,7 @@ namespace ItemModKit.Adapters.Duckov.Locator
             if (!string.IsNullOrEmpty(_filterNameContainsPart))
             {
                 var partLower = _filterNameContainsPart.ToLowerInvariant();
-                // direct word match first
+                // 先尝试按完整单词命中，再回退到 contains 扫描。
                 if (_nameWordIndex.TryGetValue(partLower, out var wl)) return wl;
                 if (!_nameQueryCache.TryGetValue(_filterNameContainsPart, out var cached)) { cached = new List<IItemHandle>(); foreach (var h in _all) { var n = h.DisplayName; if (!string.IsNullOrEmpty(n) && n.ToLowerInvariant().Contains(partLower)) cached.Add(h); } _nameQueryCache[_filterNameContainsPart] = cached; } return cached;
             }
@@ -192,7 +195,7 @@ namespace ItemModKit.Adapters.Duckov.Locator
             LastQueryTicks = ticks; LastResultCount = resultCount; LastPredicateCount = _preds.Count;
             try { LastSourceSize = src is ICollection<IItemHandle> c ? c.Count : 0; } catch { LastSourceSize = 0; }
             TotalQueryTicks += ticks; QueryCount++; if (ticks > MaxQueryTicks) MaxQueryTicks = ticks;
-            // warn if query exceeds 5ms
+            // 查询超过 5ms 时打慢查询日志，便于定位谓词或索引退化问题。
             try { if (ticks > 5 * System.TimeSpan.TicksPerMillisecond) ItemModKit.Core.Log.Warn($"[IMK.Query] slow query ticks={ticks} preds={LastPredicateCount} src={LastSourceSize} results={resultCount}"); } catch { }
         }
         public (double avgMs, double maxMs, int queries) SnapshotPerf()

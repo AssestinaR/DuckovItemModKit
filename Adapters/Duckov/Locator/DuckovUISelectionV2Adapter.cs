@@ -9,7 +9,8 @@ namespace ItemModKit.Adapters.Duckov.Locator
             handle = null;
             try
             {
-                object raw; if (IMKDuckov.UISelection.TryGetCurrentItem(out raw) && raw != null)
+                object raw;
+                if (DuckovUISelectionResolver.TryGetCurrentItem(out raw) && raw != null)
                 {
                     handle = DuckovHandleFactory.CreateItemHandle(raw);
                     return true;

@@ -105,10 +105,10 @@ namespace ItemModKit.Diagnostics
                 try
                 {
                     var ts = DateTime.Now.ToString("O");
-                    // JSON line (machine friendly) - avoid interpolated braces
+                    // JSON 行，方便日志工具或脚本直接机器读取。
                     var json = "{\"ts\":\"" + ts + "\",\"kind\":\"span\",\"name\":\"" + Escape(_name) + "\",\"durMs\":" + dur.ToString("0.###") + ",\"area\":\"" + Escape(_area) + "\",\"frame\":" + _frame + ",\"mem\":" + memDelta + ",\"gc0\":" + d0 + ",\"gc1\":" + d1 + ",\"gc2\":" + d2 + ",\"file\":\"" + Escape(_file) + "\",\"member\":\"" + Escape(_member) + "\",\"line\":" + _line + "}";
                     UnityEngine.Debug.Log(json);
-                    // Plain line (human friendly)
+                    // 普通可读日志行，便于人工直接查看。
                     var fileOnly = SafePath(_file);
                     UnityEngine.Debug.Log($"[IMK-PERF] {(_area ?? "")}:{_name} {dur:0.###}ms memΔ={memDelta} gc={d0}/{d1}/{d2} at {_member} ({fileOnly}:{_line})");
                 }

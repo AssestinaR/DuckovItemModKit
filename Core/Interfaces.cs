@@ -131,7 +131,8 @@ namespace ItemModKit.Core
     }
 
     /// <summary>
-    /// 查询接口：从背包/仓库/任意背包定位物品，或枚举集合。
+    /// Stage 1 兼容查询接口：提供常见背包/仓库/武器槽读取入口。
+    /// 当调用方只需要“按位置拿到裸对象”时适合使用它；若需要 handle、逻辑 ID、范围过滤与组合谓词，应改用 locator 体系的 QueryV2。
     /// </summary>
     public interface IItemQuery
     {
@@ -147,12 +148,13 @@ namespace ItemModKit.Core
         System.Collections.Generic.IEnumerable<object> EnumerateBackpack();
         /// <summary>枚举仓库全部物品。</summary>
         System.Collections.Generic.IEnumerable<object> EnumerateStorage();
-        /// <summary>枚举所有可发现的背包物品集合。</summary>
+        /// <summary>枚举所有可发现的背包物品集合，不保证包含世界掉落或未注册到兼容路径的容器。</summary>
         System.Collections.Generic.IEnumerable<object> EnumerateAllInventories();
     }
 
     /// <summary>
-    /// UI 选中项辅助：提供当前详情/操作菜单目标的读取。
+    /// Stage 1 兼容 UI 选中项辅助：提供当前详情/操作菜单目标的读取。
+    /// 返回的是裸对象，适合旧逻辑快速接入；新逻辑优先走 UISelectionV2 或 IMKDuckov.TryGetCurrentSelectedHandle()。
     /// </summary>
     public interface IUISelection
     {
@@ -190,6 +192,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 重生/替换服务：用新物品替换旧物品，必要时保持位置。
+    /// 这是最小成功语义接口，只要求返回新物品；更细的 diagnostics、failure taxonomy 和 report 语义通过 IMKDuckov 的 detailed/report facade 暴露。
     /// </summary>
     public interface IRebirthService
     {
@@ -228,6 +231,8 @@ namespace ItemModKit.Core
     { 
         /// <summary>槽位键。</summary>
         public string Key; 
+        /// <summary>槽位来源分类提示。</summary>
+        public SlotPersistenceOriginHint OriginHint;
         /// <summary>是否已占用。</summary>
         public bool Occupied; 
         /// <summary>可插入类型。</summary>
@@ -330,6 +335,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 物品工厂接口：实例化/生成/克隆/删除等操作。
+    /// 通常用于“先拿到一个新根物品”，随后再交给写服务、restore orchestration 或 rebirth 流程继续处理。
     /// </summary>
     public interface IItemFactory
     {
@@ -349,6 +355,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 物品移动接口：跨背包/仓库/世界以及堆叠操作。
+    /// 这组接口负责“位置变化”，不负责核心字段、变量、效果等内容写入。
     /// </summary>
     public interface IItemMover
     {
@@ -357,7 +364,7 @@ namespace ItemModKit.Core
         RichResult TryAddToInventory(object item, object inventory, int? index = null, bool allowMerge = true);
         /// <summary>从背包移除物品。</summary>
         RichResult TryRemoveFromInventory(object item);
-        /// <summary>在同一背包移动物品位置。</summary>
+        /// <summary>在同一背包移动物品位置；索引基准由具体实现决定。</summary>
         RichResult TryMoveInInventory(object inventory, int fromIndex, int toIndex);
         /// <summary>跨背包转移物品。</summary>
         RichResult TryTransferBetweenInventories(object item, object fromInventory, object toInventory, int? toIndex = null, bool allowMerge = true);
@@ -395,6 +402,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// UI 刷新服务：触发背包刷新与需要检查状态变更。
+    /// 当写服务或 restore/rebirth 已经处理完底层数据，但界面尚未反映时，调用方才需要直接使用它。
     /// </summary>
     public interface IUIRefreshService
     {
@@ -404,6 +412,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 背包解析服务：解析字符串目标到具体背包（如 character/storage）。
+    /// 主要供 facade、clone、restore、rebirth 等入口把“用户友好目标标识”转换为运行时容器对象。
     /// </summary>
     public interface IInventoryResolver
     {
@@ -415,6 +424,7 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 背包放置服务：尝试放置并在必要时安排延迟重试。
+    /// 适合 attach 阶段使用，帮助调用方区分“已放入”“需要延迟重试”和“直接失败”。
     /// </summary>
     public interface IInventoryPlacementService
     {

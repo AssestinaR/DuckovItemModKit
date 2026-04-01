@@ -1,183 +1,113 @@
 ﻿# ItemModKit (IMK) 物品模组工具包
 
-轻量、代码优先的《逃离鸭科夫》物品模组开发工具包。目标：统一常见物品操作接口，最小化反射细节，让模组专注业务逻辑。
+IMK 是《逃离鸭科夫》的运行时物品修改前置框架。它的目标不是承包整个玩法系统，而是把物品结构操作、事务、回滚、持久化和常见诊断收口成可复用接口，让后置 mod 直接基于 `IMKDuckov` 写业务逻辑。
 
-- 运行时要求：.NET Standard 2.1（游戏为 mono，非 IL2CPP）
-- 组成：`ItemModKit.Core`（接口/DTO/结果/日志） + `ItemModKit.Adapters.Duckov`（Duckov 运行时适配） + `ItemModKit.Samples`（示例与调试窗口）
+- 运行时要求：`.NET Standard 2.1`
+- 主要入口：`ItemModKit.Adapters.Duckov.IMKDuckov`
+- 当前定位：物品结构与状态修改框架，不是通用 combat framework
 
-## 安装与引用
-- 将 `ItemModKit` 作为前置框架 Mod 放入 Mods 目录（或将本仓编译出的 DLL 作为依赖）
-- 你的模组工程目标框架设为 `netstandard2.1`
-- 在代码中直接使用门面 `IMKDuckov` 获取服务（无需额外初始化）
+## 先看什么
 
-## 服务地图（门面 `IMKDuckov`）
-- `Item`：`IItemAdapter`（名称/品质/价值/变量/常量/修饰/槽位等的最低层访问）
-- `Inventory`：`IInventoryAdapter`（是否在背包、容量、索引等）
-- `Slot`：`ISlotAdapter`（宿主与槽位交互的低层工具）
-- `Read`：`IReadService`（读取快照、修饰描述、效果列表、统计等）
-- `Write`：`IWriteService`（写核心字段、变量/常量/标签、统计/修饰、效果、槽位、事务）
-- `Mover`：`IItemMover`（发送到玩家/仓库、背包移动、拆分/合并、世界掉落、缓冲取回）
-- `Factory`：`IItemFactory`（按 TypeId 生成、克隆、删除）
-- `Rebirth`：`IRebirthService`（替换重生，支持保留位置 `keepLocation`）
-- `Persistence`：`IItemPersistence`（内嵌元数据、IMK_* 变量、Owner 归属）
-- `Query`：`IItemQuery`（常见来源检索）
-- `UISelection`：`IUISelection`（当前 UI 选中物品/集合）
-- 事件：`ItemEvents`（物品增删改移/合并/拆分）、`WorldDrops`（世界掉落）
-- 版本/能力：`Version`、`Capabilities`、`Require(min, out err)`
-- 日志/归属/锁：`UseLogger`、`GetOwnerId/IsOwnedBy`、`TryLock/Unlock`
+默认只看两份文档：
 
-## 一分钟上手（常用场景配方）
-- 取当前 UI 选择：`IMKDuckov.UISelection.TryGetCurrentItem(out var item)`
-- 写核心字段/变量/常量/标签：`Write.TryWriteCoreFields/Variables/Constants/Tags`
-- 统计与修饰：`Write.TryEnsureStat/SetStatValue/AddModifier`，`Read.TryReadModifierDescriptions`
-- 效果：`Write.TryAddEffect/SetEffectProperty/AddEffectComponent/EnableEffect/RemoveEffect`
-- 槽位：`Read.TryReadSlots` + `Write.TryPlugIntoSlot/UnplugFromSlot/AddSlot/RemoveSlot/MoveBetweenSlots`
-- 背包与世界：`Mover.TryAddToInventory/MoveInInventory/SendToPlayerInventory/SendToWarehouse/TryDropToWorldNearPlayer/Buffer` 系列
-- 栈：`Mover.TrySplitStack/TryMergeStacks`
-- 生成与删除：`Factory.TryGenerateByTypeId/TryCloneItem/TryDeleteItem`
-- 替换重生：`Rebirth.Replace(oldItem, meta:null, keepLocation:true|false)`（支持包装对象）
-- 事务：`var tok = Write.BeginTransaction(item); ... Write.CommitTransaction(item, tok)`（失败走 `RollbackTransaction`）
-- 持久化：`Persistence.RecordMeta(item, meta, writeVariables:true)` / `TryExtractMeta`
+1. 当前页 [README.md](README.md)：面向下游 mod 作者，讲如何接入和调用 IMK。
+2. [docs/imk-working-brief.md](docs/imk-working-brief.md)：面向维护者，讲 IMK 的方向、边界和当前不做什么。
 
-所有 `Try*` 返回 `RichResult`：检查 `Ok/Code/Error`，避免异常传播。
+其余文档当前都视为补充或过渡材料：
 
-## 事件（可选）
-- 直接订阅：`IMKDuckov.ItemEvents.OnItemAdded/Removed/Changed/Moved/Merged/Split += ...`
-- 外部事件模式：
-  - 启用：`IMKDuckov.BeginExternalEvents()`（IMK 停止轮询）
-  - 从你的补丁中发布：`IMKDuckov.PublishItemAdded(item, ctx)` 等
-  - 停用：`IMKDuckov.EndExternalEvents()`
+- [API_FREEZE.md](API_FREEZE.md)：稳定公开面清单，主要给维护者判断签名/语义能不能动。
+- [Collaboration.md](Collaboration.md)：多模组协作约定。
+- [TODO.md](TODO.md)：当前 backlog 和未收口议题。
+- [docs/README.md](docs/README.md)：旧的内部索引页，当前只作为过渡入口保留。
 
-## 示例与调试
-- `ItemModKit.Samples` 提供 `IMKDebugWindow`：
-  - 一键测试、随机压力、全量新接口、随机综合、超级压力测试（可回放追踪、性能采样）
-  - 可作为调用参考与自检脚本
+## IMK 当前能做什么
 
-## 错误码与健壮性
-- 常见 `ErrorCode`：`InvalidArgument/NotFound/NotSupported/OperationFailed/DependencyMissing`
-- 建议：所有写操作前验证输入，读取 `RichResult.Code` 决定降级或回退（例如 Drop 失败改为 SendToWarehouse）
+IMK 目前已经形成比较稳定的能力主轴：
 
-## 多模组协作建议
-- 归属：默认自动推断；跨模时用 `DuckovOwnership.Use("YourMod")` 包裹写入
-- 锁：对竞争对象写入使用 `TryLock/Unlock`
-- 变量命名：IMK 保留 `IMK_*`，你的模组使用 `<ModName>_*` 前缀
-- 版本握手：`IMKDuckov.Require(new Version(0,1,0), out var err)`
+- 物品基础读写：核心字段、变量、常量、标签。
+- 结构能力：slot、inventory、child inventory、tree restore。
+- 状态能力：stats、modifier descriptions、effects。
+- 运行时支撑：clone、rebirth、persistence、dirty/flush、recent reports。
+- 事件与定位：item events、world drops、ownership、QueryV2、UISelectionV2。
 
-## 最佳实践
-- 所有 IMK API 在主线程调用
-- 优先用服务层 `Read/Write/Mover/Factory`，避免自行反射
-- 使用事务包裹多步写入，失败回滚
-- 记录 `RichResult` 并输出上下文，便于问题定位
+当前 `buffs` 也已进入 IMK，但仍刻意停留在 draft facade：它适合 Probe、内部工具和受控下游 mod 使用，暂时不进入冻结的 `IReadService` / `IWriteService`。
 
-## 疑难排查
-- 对象无 `Stats/Slots/Effects`：按 `NotSupported` 处理即可
-- 放置/掉落失败：检查物品是否允许或补全回退策略
-- Rebirth 失败：确认输入是否为有效 `Item` 或可被解包的包装对象
+## 不在 IMK 当前主线里的内容
 
-更多特性与接口清单见 `README_FEATURES.md`。
+这些方向现在不应被理解为 IMK 的主承诺：
 
-## 迁移说明（Clone 总线化管线）
-- 已提供总线化克隆管线：`IMKDuckov.Clone.TryCloneToInventory(item, options)`，包含策略选择（TreeData→Unity 回退）、变量合并、标签复制、放置与可选 UI 刷新。
-- 旧的 TreeData 直接克隆示例与端点已迁移到新管线：
-  - `/item/cloneTreeToBag`、`/item/cloneTreeAdvToBag` 等现已转为内部调用 `IMKDuckov.Clone`（保持兼容）。
-  - 推荐统一使用新端点 `/item/clonePipeline`，可通过 query 参数控制 `strategy/merge/filter/target`。
-- API 兼容性：`DuckovTreeDataService.TryCloneIntoInventoryAdvanced*` 已标记 `[Obsolete]` 并内部转发到管线，未来版本将移除。
-- 第三方模组可通过 `ClonePipelineOptions.AcceptVariableKey` 传入变量过滤器。
+- 通用 combat runtime bridge
+- 大而全的行为模板系统
+- 由 IMK 自己负责感知开火、跑动、停止开火等所有运行时战斗状态
 
-# ItemModKit (IMK) ?????鹤???
+如果后续确实需要承接这类需求，方向也应是“薄事件入口或桥接点”，而不是把 IMK 做成完整玩法框架。
 
-> Stage 1 API Freeze: See `docs/API_FREEZE.md` for the list of stable contracts. Additive changes only; no breaking signature changes.
+## 服务地图
 
-?????????????????????????????????????????????????????????????С?????????????????????????
+`IMKDuckov` 目前的主要服务分组如下：
 
-## Stage 1 快照与事务示例
-```csharp
-var item = IMKDuckov.UISelection.TryGetCurrentItem(out var it) ? it : null;
-if (item != null)
-{
-    // Capture original core state
-    var originalCore = SnapshotHelper.CaptureCore(IMKDuckov.Read, item);
-    // Begin transaction
-    var tok = IMKDuckov.Write.BeginTransaction(item);
-    // Attempt core field change
-    var changes = new CoreFieldChanges{ Name = originalCore.Name + "*", Value = originalCore.Value + 100 };
-    var r = IMKDuckov.Write.TryWriteCoreFields(item, changes);
-    if (!r.Ok)
-    {
-        IMKDuckov.Write.RollbackTransaction(item, tok);
-        // Optionally rollback via snapshot helper (defensive duplicate):
-        SnapshotHelper.RollbackCore(IMKDuckov.Write, item, originalCore);
-    }
-    else
-    {
-        IMKDuckov.Write.CommitTransaction(item, tok);
-        IMKDuckov.MarkDirty(item, DirtyKind.CoreFields, immediate:false);
-    }
-}
+- `Item` / `Inventory` / `Slot`：最低层适配器。
+- `Read` / `Write`：稳定主读写服务。
+- `Factory` / `Mover` / `Clone` / `Rebirth` / `Persistence`：结构与生命周期主链。
+- `QueryV2` / `UISelectionV2` / `LogicalIds` / `Ownership`：定位、查询和协作入口。
+- `ItemEvents` / `WorldDrops` / `UIRefresh`：运行时观察与刷新入口。
 
-```
+兼容入口如 `Query` 和 `UISelection` 仍然保留，但新代码应优先使用 V2 路径。
 
-## 精准(Accurate)物品位置与范围观察
-IMK 为模组提供精准的物品位置与状态信息采集能力，通过 Harmony Patch 直接植入游戏逻辑 + 轮询 + 事件模式灵活组合，供模组调用与观察者订阅：
+## 一分钟上手
 
-### 主要机制
-1. **事件桥接 (Event Bridge)** `DuckovEventBridge` 直接订阅物品 原始事件 (`onParentChanged/onItemTreeChanged`) 并在物品移动至 Inventory/Slot 时自动标记为 "World" 状态，再触发 `WorldDrops.RegisterExternalWorldItem(item)`。
-2. **掉落扫描 (WorldDrops Scan)** `DuckovWorldDropEventSource.Tick()` 周期性扫描物品信息，并推演可能的掉落/拾取状态至指定区域。
-3. **分类器/识别 (Classifier)** `DuckovInventoryClassifier` 识别 Player / Storage / LootBox 等多种来源，并通过 QueryV2 + Ownership 精确匹配物品位置与归属，推演 SlotDepth/AncestorChain 等信息。
+常见接入路径：
 
-### 识别来源
-- **Player**: 通过 `CharacterMainControl.Main.CharacterItem.Inventory` 获取
-- **Storage**: 通过 `PlayerStorage.Inventory` 获取
-- **LootBox**: 通过 `LevelManager.LootBoxInventories / LootBoxInventoriesParent` 获取
-- **World**: 物品 ParentObject == null && !InInventory && !PluggedIntoSlot (事件驱动) 通过扫描确认
+- 获取当前 UI 选中物品：`IMKDuckov.TryGetCurrentSelectedHandle()` 或 `IMKDuckov.UISelectionV2.TryGetCurrent(out var handle)`
+- 读取快照或结构：`Read.Snapshot(...)`、`Read.TryReadSlots(...)`、`Read.TryReadStats(...)`、`Read.TryReadEffects(...)`
+- 执行写入：`Write.TryWriteCoreFields(...)`、`Write.TryWriteVariables(...)`、`Write.TryEnsureStat(...)`、`Write.TryAddEffect(...)`
+- 做结构操作：`Write.TryAddSlot(...)`、`Write.TryPlugIntoSlot(...)`、`Write.TryMoveBetweenSlots(...)`
+- 做生命周期操作：`Factory.TryCloneItem(...)`、`Mover.TrySendToPlayerInventory(...)`、`ReplaceRebirthDetailed(...)`、`RestoreFromMetaDetailed(...)`
+- 读取运行时 buff draft：`EnumerateBuffCatalogDraft()`、`TryReadBuffsDraft(...)`、`TryFindBuffDraft(...)`
 
-### 事件订阅
-```csharp
-IMKDuckov.WorldDrops.OnEnvironmentDrop += raw => {
-    var handle = IMKDuckov.TryGetHandle(raw); // 可以通过 handle 获取更详细信息
-    // 更新物品位置、状态等信息后可选推送通知/更新 UI
-};
-IMKDuckov.ItemEvents.OnItemChanged += raw => { /* 处理物品位置变化逻辑 */ };
-```
+所有 `Try*` API 都返回 `RichResult`。调用侧应明确消费 `Ok`、`Code` 和 `Error`，不要把失败当异常路径之外的“隐式成功”。
 
-### 位置查询 (Locator + QueryV2)
-```csharp
-// 通过handle 查询已知类型物品
-action<IMKDuckov.QueryV2.ByTypeId(254).Equipped(true).Take(5)> 
-var guns = IMKDuckov.QueryV2.ResetPredicates().ByTagAny("Gun","Rifle").Depth(0,3).All();
-foreach (var h in guns) {
-    Debug.Log($"Gun {h.DisplayName} tid={h.TypeId} invOwned={(h.TryGetRaw()?.GetType().GetProperty("InInventory")!=null)}");
-}
-```
+## 下游调用建议
 
-### 互操作与嵌套作用域 (Scope APIs)
-- 新增 `IItemScope` 以支持复杂的作用域判断与嵌套，默认支持 Slot/词缀前缺
-- 作用链查询：Player → Storage → LootBox → World → Other
-- 扩展：可选实现通用接口 `Includes(item, inventory, owner)` 以支持各种自定义作用域场景，例如 UI 选择等。
+- 优先走服务层，不要在 mod 里重复反射 Duckov 内部对象。
+- 多步写入优先包在事务里，失败时显式 rollback。
+- 新代码优先使用 `QueryV2` / `UISelectionV2`，不要继续扩散兼容 facade。
+- 需要稳定语义时优先依赖冻结面；draft 方法只用于当前确有需要的受控场景。
+- Buffs 当前属于 draft runtime support，不等同于 IMK 已承诺完整 combat support。
 
-### 示例：物品掉落至世界状态确认
-```csharp
-void EnsureWorldState(object item) {
-    if (item == null) return;
-    var inv = item.GetType().GetProperty("InInventory", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)?.GetValue(item, null);
-    var slot = item.GetType().GetProperty("PluggedIntoSlot", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)?.GetValue(item, null);
-    if (inv == null && slot == null) {
-        IMKDuckov.WorldDrops.RegisterExternalWorldItem(item); // 确保掉落至世界
-    }
-}
-```
+## Draft 能力说明
 
-### 性能与注意事项
-| 特性 | 描述 | 推荐性 | 限制 | 备注 |
-|------|------|--------|-------|------|
-| EventBridge | 是 | 高（实时） | 否 | 直接响应原始事件，适合敏感场合 |
-| WorldDrops.Scan | 否 | 中（周期性） | 是 | 兜底方案，适合大部分场合 |
-| QueryV2 | 是 | 高（索引查询） | 否 | 推荐优先使用，性能最优 |
-| Classifier | 是 | 中（识别归属） | 否 | 自动识别物品归属，增强场景支持 |
+IMK 目前保留了几类有意不冻结的 draft 入口：
 
-### 已知问题与建议
-- 无法通过 Harmony Patch 覆盖某些原生代码或被强制避开的场景
-- 部分复杂场景可考虑结合使用多种机制以提高覆盖率
-- 推荐定期观察更新状态或配合事件系统实现动态更新
+- 槽位补建草案：`EnsureSlotsDraft(...)`
+- 资源补建草案：`EnsureResourceProvisionDraft(...)`
+- effect schema 枚举草案：`EnumerateEffectSchemaDraft(...)`
+- buffs runtime 草案：`TryReadBuffsDraft(...)`、`TryAddBuffDraft(...)` 等
 
-更多细节与接口说明见 `README_FEATURES.md` 更新部分。
+这些入口的设计原则是：先通过 Probe 和实机验证形成闭环，再决定是否进入稳定服务面。
+
+## 调试与诊断
+
+- `ItemModKit.Samples` 提供调试窗口和样例调用。
+- recent rebirth reports 可以通过 `GetRecentRebirthReports(...)`、`LogRecentRebirthReports(...)` 读取。
+- 性能采样和其他诊断工具位于 `Diagnostics/`。
+
+如果你是在做下游 mod，对你最有价值的通常仍是当前页和门面/contract 上的代码注释，而不是旧设计文档。
+
+## 协作与兼容
+
+- 跨模写入时使用 `DuckovOwnership.Use("YourMod")` 标识归属。
+- 对共享对象做竞争写入时使用 `TryLock(...)` / `Unlock(...)`。
+- 变量命名避免碰撞：IMK 保留 `IMK_*`，下游 mod 使用自己的前缀。
+- 接入前可用 `IMKDuckov.Require(...)` 做最低版本握手。
+
+## 当前文档整理状态
+
+仓库正在做文档减法。目标稳态是：
+
+- 一份短方向文档：[docs/imk-working-brief.md](docs/imk-working-brief.md)
+- 一份下游接口文档：当前页 [README.md](README.md)
+
+其余文档会逐步合并、降级为过渡材料，或把有效内容迁回代码旁边的 XML 注释。
+
+本轮已处理掉一批可直接回收的重复文档；接口速查、effects/buffs 分层边界这类内容，后续以当前页和对应实现文件注释为准。

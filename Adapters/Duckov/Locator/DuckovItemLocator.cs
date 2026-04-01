@@ -38,8 +38,8 @@ namespace ItemModKit.Adapters.Duckov.Locator
         {
             try
             {
-                var selType = DuckovTypeUtils.FindType("ItemModKit.Adapters.Duckov.DuckovUISelection");
-                var cur = selType?.GetProperty("CurrentItem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null, null);
+                object cur;
+                if (!DuckovUISelectionResolver.TryGetCurrentItem(out cur) || cur == null) return null;
                 return FromInstance(cur);
             }
             catch { return null; }

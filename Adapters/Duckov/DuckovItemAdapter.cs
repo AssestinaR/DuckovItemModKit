@@ -5,6 +5,8 @@ using System.Linq;
 using System.Reflection;
 using ItemModKit.Core;
 using ItemStatsSystem;
+using Newtonsoft.Json;
+using UnityEngine;
 using static ItemModKit.Adapters.Duckov.DuckovTypeUtils;
 
 namespace ItemModKit.Adapters.Duckov
@@ -67,45 +69,13 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 var t = item?.GetType(); if (t == null) return;
+                if (TryInvokeTypedSetter(item, t, key, value, constant)) return;
+
                 var vars = t.GetProperty("Variables", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(item, null);
                 if (vars == null) return;
                 var vt = vars.GetType();
-                // Prefer Variables helpers
-                var typeCode = value == null ? TypeCode.Empty : Type.GetTypeCode(value.GetType());
-                MethodInfo m = null;
-                switch (typeCode)
-                {
-                    case TypeCode.Int32: m = vt.GetMethod("SetInt", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); break;
-                    case TypeCode.Single: m = vt.GetMethod("SetFloat", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); break;
-                    case TypeCode.String: m = vt.GetMethod("SetString", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); break;
-                    default:
-                        m = vt.GetMethod("SetString", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                        value = value?.ToString();
-                        break;
-                }
-                if (m != null)
-                {
-                    var ps = m.GetParameters();
-                    try
-                    {
-                        if (ps.Length == 3) { m.Invoke(vars, new object[] { key, value, constant }); return; }
-                        if (ps.Length == 2) { m.Invoke(vars, new object[] { key, value }); return; }
-                    }
-                    catch { /* fallback below */ }
-                }
-                // other fallbacks: generic Set / SetOrAdd
-                foreach (var name in new[] { "Set", "SetOrAdd", "SetAny", "SetObject" })
-                {
-                    var mm = vt.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (mm == null) continue;
-                    var ps = mm.GetParameters();
-                    try
-                    {
-                        if (ps.Length == 3) { mm.Invoke(vars, new object[] { key, value, constant }); return; }
-                        if (ps.Length == 2) { mm.Invoke(vars, new object[] { key, value }); return; }
-                    }
-                    catch { }
-                }
+                if (TryInvokeTypedSetter(vars, vt, key, value, constant)) return;
+
                 // fallback: Variables.Add(new CustomData(key, value))
                 var listT = vt;
                 var add = listT.GetMethod("Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -130,6 +100,17 @@ namespace ItemModKit.Adapters.Duckov
                 var vars = t.GetProperty("Variables", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(item, null);
                 if (vars == null) return null;
                 var vt = vars.GetType();
+                var enumVars = vars as IEnumerable;
+                if (enumVars != null)
+                {
+                    foreach (var v in enumVars)
+                    {
+                        if (v == null) continue;
+                        string k = GetProp<string>(v, "Key");
+                        if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) return ReadCustomDataValue(v);
+                    }
+                }
+
                 foreach (var name in new[] { "GetInt", "GetFloat", "GetString", "GetBool" })
                 {
                     var m = vt.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -145,16 +126,6 @@ namespace ItemModKit.Adapters.Duckov
                         if (ps.Length == 1) return m.Invoke(vars, new object[] { key });
                     }
                     catch { }
-                }
-                var enumVars = vars as IEnumerable;
-                if (enumVars != null)
-                {
-                    foreach (var v in enumVars)
-                    {
-                        if (v == null) continue;
-                        string k = GetProp<string>(v, "Key");
-                        if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) return ReadCustomDataValue(v);
-                    }
                 }
                 return null;
             }
@@ -179,14 +150,14 @@ namespace ItemModKit.Adapters.Duckov
                           ?? listT.GetMethod("RemoveByKey", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new Type[] { typeof(string) }, null);
                 if (remKey != null) { remKey.Invoke(vars, new object[] { key }); return true; }
                 // 2) Find entry then Remove(entry)
-                var getEntry = listT.GetMethod("GetEntry", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                var getEntry = listT.GetMethod("GetEntry", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { typeof(string) }, null)
                             ?? listT.GetMethod("Get", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { typeof(string) }, null)
                             ?? listT.GetMethod("Find", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { typeof(string) }, null);
                 var remove = listT.GetMethod("Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 object entry = null;
                 if (getEntry != null)
                 {
-                    try { entry = getEntry.GetParameters().Length == 1 ? getEntry.Invoke(vars, new object[] { key }) : getEntry.Invoke(vars, null); } catch { entry = null; }
+                    try { entry = getEntry.Invoke(vars, new object[] { key }); } catch { entry = null; }
                 }
                 if (entry == null)
                 {
@@ -197,6 +168,22 @@ namespace ItemModKit.Adapters.Duckov
                     }
                 }
                 if (entry != null && remove != null) { remove.Invoke(vars, new[] { entry }); return true; }
+
+                var entriesField = listT.GetField("entries", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var entries = entriesField?.GetValue(vars) as IList;
+                if (entries != null)
+                {
+                    for (var index = entries.Count - 1; index >= 0; index--)
+                    {
+                        var candidate = entries[index];
+                        var candidateKey = GetProp<string>(candidate, "Key");
+                        if (!string.Equals(candidateKey, key, StringComparison.OrdinalIgnoreCase)) continue;
+                        entries.RemoveAt(index);
+                        var setDirty = listT.GetMethod("SetDirty", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        setDirty?.Invoke(vars, null);
+                        return true;
+                    }
+                }
             }
             catch { }
             return false;
@@ -244,6 +231,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 var list = new List<SlotEntry>();
+                var dynamicKeys = ReadDynamicSlotKeys(item);
                 var slots = item?.GetType().GetProperty("Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(item, null) as IEnumerable;
                 if (slots != null)
                 {
@@ -262,16 +250,15 @@ namespace ItemModKit.Adapters.Duckov
                         string plugType = GetMaybe(s, new[] { "PlugType", "Type", "ExpectedType" })?.ToString();
                         object icon = GetMaybe(s, new[] { "SlotIcon", "slotIcon" });
                         bool forbidSameId = ConvertToBool(GetMaybe(s, new[] { "ForbidItemsWithSameID", "forbidItemsWithSameID" }));
-                        // requireTags / excludeTags are List<Tag>; extract Tag.DisplayName or Tag.Key
                         string[] req = null; string[] exc = null;
                         try
                         {
-                            var reqObj = GetMaybe(s, new[] { "requireTags" }) as IEnumerable; if (reqObj != null) { var tmp = new List<string>(); foreach (var tag in reqObj) if (tag != null) tmp.Add(Convert.ToString(GetMaybe(tag, new[] { "DisplayName", "Key", "Name" })) ?? tag.ToString()); req = tmp.ToArray(); }
+                            req = ExtractSlotTagKeys(GetMaybe(s, new[] { "requireTags" }) as IEnumerable);
                         }
                         catch { }
                         try
                         {
-                            var excObj = GetMaybe(s, new[] { "excludeTags" }) as IEnumerable; if (excObj != null) { var tmp = new List<string>(); foreach (var tag in excObj) if (tag != null) tmp.Add(Convert.ToString(GetMaybe(tag, new[] { "DisplayName", "Key", "Name" })) ?? tag.ToString()); exc = tmp.ToArray(); }
+                            exc = ExtractSlotTagKeys(GetMaybe(s, new[] { "excludeTags" }) as IEnumerable);
                         }
                         catch { }
                         list.Add(new SlotEntry {
@@ -283,13 +270,104 @@ namespace ItemModKit.Adapters.Duckov
                             ExcludeTagKeys = exc,
                             ForbidSameID = forbidSameId,
                             ContentTypeId = contentTypeId,
-                            ContentName = contentName
+                            ContentName = contentName,
+                            OriginHint = !string.IsNullOrEmpty(key) && dynamicKeys.Contains(key) ? SlotPersistenceOriginHint.Dynamic : SlotPersistenceOriginHint.Builtin,
                         });
                     }
                 }
                 return list.ToArray();
             }
             catch { return Array.Empty<SlotEntry>(); }
+        }
+
+        private static string[] ExtractSlotTagKeys(IEnumerable tags)
+        {
+            if (tags == null)
+            {
+                return null;
+            }
+
+            var resolved = new List<string>();
+            foreach (var tag in tags)
+            {
+                var key = ResolveSlotTagKey(tag);
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    resolved.Add(key);
+                }
+            }
+
+            return resolved.Count == 0 ? Array.Empty<string>() : resolved.ToArray();
+        }
+
+        private static string ResolveSlotTagKey(object tag)
+        {
+            if (tag == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var unityObject = tag as UnityEngine.Object;
+                if (unityObject != null && !string.IsNullOrWhiteSpace(unityObject.name))
+                {
+                    return unityObject.name;
+                }
+            }
+            catch
+            {
+            }
+
+            foreach (var candidate in new[]
+            {
+                Convert.ToString(GetMaybe(tag, new[] { "Key" })),
+                Convert.ToString(GetMaybe(tag, new[] { "Name", "name" })),
+                Convert.ToString(GetMaybe(tag, new[] { "DisplayName" })),
+                tag.ToString(),
+            })
+            {
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private HashSet<string> ReadDynamicSlotKeys(object item)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var raw = GetVariable(item, DuckovSlotProvisioningDraft.DefaultPersistenceVariableKey) as string;
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return result;
+                }
+
+                var payload = JsonConvert.DeserializeObject<SlotPersistenceDraftData>(raw);
+                if (payload?.Slots == null)
+                {
+                    return result;
+                }
+
+                foreach (var entry in payload.Slots)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.Key))
+                    {
+                        continue;
+                    }
+
+                    result.Add(entry.Key);
+                }
+            }
+            catch
+            {
+            }
+
+            return result;
         }
 
         /// <inheritdoc />
@@ -313,24 +391,27 @@ namespace ItemModKit.Adapters.Duckov
                 if (p == null) return;
                 var hasSetter = p.CanWrite;
                 var curObj = p.GetValue(item, null);
-                // If property is array and writable, replace array
+                // 若属性本身是可写数组，直接整体替换。
                 if (hasSetter && p.PropertyType.IsArray)
                 {
                     p.SetValue(item, tags ?? Array.Empty<string>(), null); return;
                 }
-                // If we got a list we can mutate
+
+                // 若拿到的是可变列表，则原地清空并重写。
                 var ilist = curObj as System.Collections.IList;
                 if (ilist != null && !ilist.IsFixedSize)
                 {
                     ilist.Clear(); if (tags != null) foreach (var s in tags) ilist.Add(s); return;
                 }
-                // Try set with compatible collection if setter exists
+
+                // 若存在 setter，则再尝试写入兼容集合类型。
                 if (hasSetter)
                 {
                     if (p.PropertyType == typeof(List<string>)) { p.SetValue(item, tags == null ? new List<string>() : new List<string>(tags), null); return; }
                     if (typeof(IEnumerable<string>).IsAssignableFrom(p.PropertyType)) { p.SetValue(item, tags ?? Array.Empty<string>(), null); return; }
                 }
-                // Last resort: look for Add/Remove/Clear methods on current object
+
+                // 最后退路：尝试在当前集合对象上查找 Clear/Add 之类的方法做原地更新。
                 if (curObj != null)
                 {
                     var t = curObj.GetType();
@@ -474,9 +555,74 @@ namespace ItemModKit.Adapters.Duckov
                     }
                 }
                 if (entry != null && remove != null) { remove.Invoke(cons, new[] { entry }); return true; }
+
+                var entriesField = ct.GetField("entries", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var entries = entriesField?.GetValue(cons) as IList;
+                if (entries != null)
+                {
+                    for (var index = entries.Count - 1; index >= 0; index--)
+                    {
+                        var candidate = entries[index];
+                        var candidateKey = GetProp<string>(candidate, "Key");
+                        if (!string.Equals(candidateKey, key, StringComparison.OrdinalIgnoreCase)) continue;
+                        entries.RemoveAt(index);
+                        var setDirty = ct.GetMethod("SetDirty", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        setDirty?.Invoke(cons, null);
+                        return true;
+                    }
+                }
             }
             catch { }
             return false;
+        }
+
+        private static bool TryInvokeTypedSetter(object target, Type targetType, string key, object value, bool createIfMissing)
+        {
+            if (target == null || targetType == null || string.IsNullOrEmpty(key)) return false;
+
+            if (value is int intValue)
+            {
+                return TryInvokeExact(target, targetType, "SetInt", new[] { typeof(string), typeof(int), typeof(bool) }, key, intValue, createIfMissing)
+                    || TryInvokeExact(target, targetType, "SetInt", new[] { typeof(string), typeof(int) }, key, intValue);
+            }
+
+            if (value is float floatValue)
+            {
+                return TryInvokeExact(target, targetType, "SetFloat", new[] { typeof(string), typeof(float), typeof(bool) }, key, floatValue, createIfMissing)
+                    || TryInvokeExact(target, targetType, "SetFloat", new[] { typeof(string), typeof(float) }, key, floatValue);
+            }
+
+            if (value is double doubleValue)
+            {
+                var converted = Convert.ToSingle(doubleValue);
+                return TryInvokeExact(target, targetType, "SetFloat", new[] { typeof(string), typeof(float), typeof(bool) }, key, converted, createIfMissing)
+                    || TryInvokeExact(target, targetType, "SetFloat", new[] { typeof(string), typeof(float) }, key, converted);
+            }
+
+            if (value is bool boolValue)
+            {
+                return TryInvokeExact(target, targetType, "SetBool", new[] { typeof(string), typeof(bool), typeof(bool) }, key, boolValue, createIfMissing)
+                    || TryInvokeExact(target, targetType, "SetBool", new[] { typeof(string), typeof(bool) }, key, boolValue);
+            }
+
+            var text = value as string ?? value?.ToString();
+            return TryInvokeExact(target, targetType, "SetString", new[] { typeof(string), typeof(string), typeof(bool) }, key, text, createIfMissing)
+                || TryInvokeExact(target, targetType, "SetString", new[] { typeof(string), typeof(string) }, key, text);
+        }
+
+        private static bool TryInvokeExact(object target, Type targetType, string methodName, Type[] parameterTypes, params object[] args)
+        {
+            try
+            {
+                var method = targetType.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, parameterTypes, null);
+                if (method == null) return false;
+                method.Invoke(target, args);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // Helper: attempt to read typed value from CustomData entry

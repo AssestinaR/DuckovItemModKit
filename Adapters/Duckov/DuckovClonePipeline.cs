@@ -9,6 +9,12 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed class DuckovClonePipeline : IClonePipeline
     {
+        private sealed class CloneExecutionResult : RestoreExecutionResultBase
+        {
+        }
+
+        private static readonly ITreeRestoreOrchestrator s_restoreOrchestrator = DuckovTreeRestoreOrchestrator.Shared;
+
         /// <summary>
         /// 从源物品克隆一个副本，按策略完成克隆并尝试放入目标背包。
         /// </summary>
@@ -19,62 +25,106 @@ namespace ItemModKit.Adapters.Duckov
         {
             options = options ?? new ClonePipelineOptions();
             if (source == null) return RichResult<ClonePipelineResult>.Fail(ErrorCode.InvalidArgument, "source null");
-            var diag = options.Diagnostics ? new Dictionary<string, object>() : null;
-
-            object newItem = null; string used = null; string err = null;
-            // 策略选择
-            if (options.Strategy == CloneStrategy.TreeData || options.Strategy == CloneStrategy.Auto)
+            var execution = ExecuteClone(source, options);
+            if (!execution.Succeeded || execution.RootItem == null)
             {
-                var r = DuckovTreeDataService.TryCloneFromSource(source);
-                if (r.Ok && r.Value != null) { newItem = r.Value; used = "TreeData"; }
-                else if (options.Strategy == CloneStrategy.TreeData) { err = r.Error ?? "TreeData clone failed"; }
-            }
-            if (newItem == null && (options.Strategy == CloneStrategy.Unity || options.Strategy == CloneStrategy.Auto))
-            {
-                var r = IMKDuckov.Factory.TryCloneItem(source);
-                if (r.Ok && r.Value != null) { newItem = r.Value; used = "Unity"; }
-                else if (options.Strategy == CloneStrategy.Unity) { err = r.Error ?? "Unity clone failed"; }
-            }
-            if (newItem == null) return RichResult<ClonePipelineResult>.Fail(ErrorCode.OperationFailed, err ?? "clone failed");
-
-            // 变量合并策略（默认仅合并缺失键）与标签复制
-            if (options.VariableMerge != VariableMergeMode.None)
-            {
-                try { IMKDuckov.VariableMerge.Merge(source, newItem, options.VariableMerge, acceptKey: options.AcceptVariableKey); } catch { }
-            }
-            if (options.CopyTags)
-            {
-                try { var tags = IMKDuckov.Item.GetTags(source) ?? Array.Empty<string>(); if (tags.Length > 0) IMKDuckov.Write.TryWriteTags(newItem, tags, merge: true); } catch { }
+                return RichResult<ClonePipelineResult>.Fail(execution.ErrorCode, BuildCloneFailureMessage(execution));
             }
 
-            // 放置：解析目标背包并尝试放入
-            object inv = IMKDuckov.InventoryResolver.Resolve(options.Target) ?? IMKDuckov.InventoryResolver.ResolveFallback();
-            bool added = false; int index = -1; bool deferred = false;
-            if (inv != null)
+            var diag = options.Diagnostics ? BuildCloneDiagnostics(execution, options) : null;
+            var res = new ClonePipelineResult
             {
-                try
-                {
-                    var place = IMKDuckov.InventoryPlacement.TryPlace(inv, newItem, allowMerge: true, enableDeferredRetry: true);
-                    added = place.added; index = place.index; deferred = place.deferredScheduled;
-                }
-                catch { }
-                if (options.RefreshUI)
-                {
-                    IMKDuckov.UIRefresh.RefreshInventory(inv);
-                }
-            }
-
-            if (options.Diagnostics && diag != null)
-            {
-                diag["strategy"] = used;
-                diag["target"] = options.Target;
-                diag["added"] = added; diag["index"] = index; diag["deferred"] = deferred;
-                try { diag["newTid"] = IMKDuckov.Item.GetTypeId(newItem); } catch { }
-                try { diag["newName"] = IMKDuckov.Item.GetDisplayNameRaw(newItem) ?? IMKDuckov.Item.GetName(newItem); } catch { }
-            }
-            var res = new ClonePipelineResult { NewItem = newItem, Added = added, Index = index, StrategyUsed = used, Diagnostics = diag };
-            try { var oldH = ItemModKit.Adapters.Duckov.Locator.DuckovHandleFactory.CreateItemHandle(source); var newH = ItemModKit.Adapters.Duckov.Locator.DuckovHandleFactory.CreateItemHandle(newItem); IMKDuckov.LogicalIds.Bind(oldH, newH); IMKDuckov.RegisterHandle(newH); } catch { }
+                NewItem = execution.RootItem,
+                Added = execution.Attached,
+                Index = execution.AttachedIndex,
+                StrategyUsed = execution.StrategyUsed,
+                RestoreDiagnostics = execution.Diagnostics,
+                Diagnostics = diag,
+            };
             return RichResult<ClonePipelineResult>.Success(res);
+        }
+
+        private CloneExecutionResult ExecuteClone(object source, ClonePipelineOptions options)
+        {
+            RestoreDiagnostics diagnostics = null;
+            var request = new RestoreRequest
+            {
+                Source = source,
+                SourceKind = RestoreSourceKind.Clone,
+                Target = options.Target,
+                TargetMode = string.IsNullOrEmpty(options.Target) ? RestoreTargetMode.AttachToResolvedHost : RestoreTargetMode.AttachToResolvedHost,
+                Strategy = options.Strategy,
+                VariableMergeMode = options.VariableMerge,
+                CopyTags = options.CopyTags,
+                AllowDegraded = options.Strategy == CloneStrategy.Auto,
+                PublishEvents = false,
+                RefreshUI = options.RefreshUI,
+                MarkDirty = false,
+                DiagnosticsEnabled = options.Diagnostics,
+                CallerTag = "clone",
+                ResolvedTargetKey = options.Target,
+                AcceptVariableKey = options.AcceptVariableKey,
+            };
+            request.DiagnosticsFinalized = (diag, _) => diagnostics = diag;
+            request.DiagnosticsMetadata["clone.target"] = options.Target ?? string.Empty;
+            request.DiagnosticsMetadata["clone.copyTags"] = options.CopyTags;
+            request.DiagnosticsMetadata["clone.variableMerge"] = options.VariableMerge.ToString();
+            request.DiagnosticsMetadata["clone.strategyRequested"] = options.Strategy.ToString();
+
+            var restore = s_restoreOrchestrator.Execute(request);
+            if (!restore.Ok || restore.Value == null)
+            {
+                var failed = new CloneExecutionResult();
+                failed.ApplyFailure(restore.Code, restore.Error ?? "clone restore failed", diagnostics);
+                return failed;
+            }
+
+            var succeeded = new CloneExecutionResult
+            {
+                TargetMode = request.TargetMode,
+            };
+            succeeded.ApplyRestoreSuccess(restore.Value, diagnostics);
+            return succeeded;
+        }
+
+        private static Dictionary<string, object> BuildCloneDiagnostics(CloneExecutionResult execution, ClonePipelineOptions options)
+        {
+            var diag = new Dictionary<string, object>
+            {
+                ["strategy"] = execution.StrategyUsed,
+                ["target"] = options.Target,
+                ["added"] = execution.Attached,
+                ["index"] = execution.AttachedIndex,
+            };
+
+            if (execution.Diagnostics != null)
+            {
+                diag["phase"] = execution.FinalPhase.ToString();
+                diag["fallbackUsed"] = execution.Diagnostics.FallbackUsed;
+                foreach (var pair in execution.Diagnostics.Metadata)
+                {
+                    diag[pair.Key] = pair.Value;
+                }
+            }
+
+            try { diag["newTid"] = IMKDuckov.Item.GetTypeId(execution.RootItem); } catch { }
+            try { diag["newName"] = IMKDuckov.Item.GetDisplayNameRaw(execution.RootItem) ?? IMKDuckov.Item.GetName(execution.RootItem); } catch { }
+            return diag;
+        }
+
+        private static string BuildCloneFailureMessage(CloneExecutionResult execution)
+        {
+            if (execution == null)
+            {
+                return "clone restore failed";
+            }
+
+            var diagnostics = execution.Diagnostics;
+            var attached = diagnostics != null && diagnostics.Metadata.TryGetValue("attached", out var attachedObj) && attachedObj is bool attachedBool && attachedBool;
+            var target = diagnostics != null && diagnostics.Metadata.TryGetValue("clone.target", out var targetObj) ? Convert.ToString(targetObj) : string.Empty;
+            return execution.BuildFailureMessage(
+                new KeyValuePair<string, string>("attached", attached ? "true" : "false"),
+                new KeyValuePair<string, string>("target", target ?? string.Empty));
         }
     }
 }
