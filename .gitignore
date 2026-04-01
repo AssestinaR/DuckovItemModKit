@@ -15,6 +15,19 @@
 artifacts/
 _Debug/
 _Release/
+[Dd]ebug/
+[Rr]elease/
+[Xx]64/
+[Xx]86/
+[Aa][Rr][Mm]64/
+*.pdb
+*.mdb
+*.ilk
+*.cachefile
+*.VC.db
+*.opendb
+*.db-shm
+*.db-wal
 
 # MSBuild logs
 msbuild.log
@@ -42,9 +55,11 @@ packages/
 # Rider/ReSharper
 _ReSharper*/
 *.DotSettings.user
+.idea/
 
 # VS Code
 .vscode/
+.history/
 
 # OS files
 Thumbs.db
@@ -68,6 +83,11 @@ coverage/
 
 # Git merge leftovers
 *.orig
+
+# Local archive / scratch
+bak/
+legacy/
+新建 文本文档.txt
 
 # IMK project specific: skip reference docs in this project folder
 # (this .gitignore is placed in ItemModKit/, so this only affects ItemModKit/docs)

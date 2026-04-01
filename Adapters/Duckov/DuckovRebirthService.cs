@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using ItemModKit.Core;
 using ItemStatsSystem;
 using UnityEngine;
@@ -7,19 +7,20 @@ using static ItemModKit.Adapters.Duckov.DuckovTypeUtils;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// ÖØÉú·şÎñ£º¸ù¾İ¾ÉÎïÆ·ÓëÔªÊı¾İÉú³ÉĞÂÎïÆ·£¬²¢¾¡Á¿±£³ÖÔ­Î»ÖÃ£¨±³°ü»ò½ÇÉ«²ÛÎ»£©¡£
-    /// - Èô keepLocation=true ÇÒ¾ÉÎïÆ·ÔÚ±³°ü£º³¢ÊÔÔ­Ë÷ÒıÌæ»»£¬·ñÔòºÏ²¢·ÅÈë£¬Ê§°ÜÔò·¢¸øÍæ¼Ò
-    /// - Èô keepLocation=false£º³¢ÊÔ²åÈë½ÇÉ«²ÛÎ»£¬·ñÔò·¢¸øÍæ¼Ò
-    /// ×îºóÏú»Ù¾ÉÎïÆ·£¬Ë¢ĞÂÏà¹Ø±³°ü£¬²¢Á¢¼´³Ö¾Ã»¯ĞÂÎïÆ·µÄºËĞÄ/±äÁ¿/±êÇ©
+    /// é‡ç”ŸæœåŠ¡ï¼šæ ¹æ®æ—§ç‰©å“ä¸å…ƒæ•°æ®ç”Ÿæˆæ–°ç‰©å“ï¼Œå¹¶å°½é‡ä¿æŒåŸä½ç½®ï¼ˆèƒŒåŒ…æˆ–è§’è‰²æ§½ä½ï¼‰ã€‚
+    /// - è‹¥ keepLocation=true ä¸”æ—§ç‰©å“åœ¨èƒŒåŒ…ï¼šå°è¯•åŸç´¢å¼•æ›¿æ¢ï¼Œå¦åˆ™åˆå¹¶æ”¾å…¥ï¼Œå¤±è´¥åˆ™å‘ç»™ç©å®¶
+    /// - è‹¥ keepLocation=falseï¼šå°è¯•æ’å…¥è§’è‰²æ§½ä½ï¼Œå¦åˆ™å‘ç»™ç©å®¶
+    /// æœ€åé”€æ¯æ—§ç‰©å“ï¼Œåˆ·æ–°ç›¸å…³èƒŒåŒ…ï¼Œå¹¶ç«‹å³æŒä¹…åŒ–æ–°ç‰©å“çš„æ ¸å¿ƒ/å˜é‡/æ ‡ç­¾
+    /// + 2024-Builder: æ”¯æŒå¯¹ IMK_MissingType çš„æ—§ç‰©å“é‡ç”Ÿï¼Œä¿ç•™åŸæœ‰ IMK_ æ ‡è®°å˜é‡
     /// </summary>
     internal sealed class DuckovRebirthService : IRebirthService
     {
         private readonly IItemAdapter _item; private readonly IInventoryAdapter _inv; private readonly ISlotAdapter _slot; private readonly IItemPersistence _persist;
-        /// <summary>¹¹Ôìº¯Êı£º×¢ÈëÎïÆ·/±³°ü/²ÛÎ»/³Ö¾Ã»¯ÊÊÅäÆ÷¡£</summary>
+        /// <summary>æ„é€ å‡½æ•°ï¼šæ³¨å…¥ç‰©å“/èƒŒåŒ…/æ§½ä½/æŒä¹…åŒ–é€‚é…å™¨ã€‚</summary>
         public DuckovRebirthService(IItemAdapter item, IInventoryAdapter inv, ISlotAdapter slot, IItemPersistence persist) { _item = item; _inv = inv; _slot = slot; _persist = persist; }
         /// <summary>
-        /// ÓÃÖ¸¶¨ÔªÊı¾İÌæ»»¾ÉÎïÆ·²¢Éú³ÉĞÂÎïÆ·£¨Èô meta Îª¿ÕÔò´Ó¾ÉÎïÆ·ÍÆµ¼£©¡£
-        /// keepLocation ¿ØÖÆÊÇ·ñ³¢ÊÔ±£³ÖÔ­Î»ÖÃ¡£
+        /// ç”¨æŒ‡å®šå…ƒæ•°æ®æ›¿æ¢æ—§ç‰©å“å¹¶ç”Ÿæˆæ–°ç‰©å“ï¼ˆè‹¥ meta ä¸ºç©ºåˆ™ä»æ—§ç‰©å“æ¨å¯¼ï¼‰ã€‚
+        /// keepLocation æ§åˆ¶æ˜¯å¦å°è¯•ä¿æŒåŸä½ç½®ã€‚
         /// </summary>
         public RichResult<object> ReplaceRebirth(object oldItem, ItemMeta meta, bool keepLocation = true)
         {
@@ -28,22 +29,56 @@ namespace ItemModKit.Adapters.Duckov
                 var oldComp = UnwrapToItem(oldItem);
                 var eff = EnsureMetaFromObject(meta, oldItem);
                 int typeId = eff?.TypeId > 0 ? eff.TypeId : SafeTypeId(oldItem);
-                var newItem = ItemAssetsCollection.InstantiateSync(typeId);
-                if (!newItem) return RichResult<object>.Fail(ErrorCode.OperationFailed, "instantiate failed");
 
-                _persist?.RecordMeta(newItem, eff, writeVariables: true);
-                try { var tags = _item.GetTags(oldItem); if (tags != null && tags.Length > 0) _item.SetTags(newItem, tags); } catch { }
+                // Detect stub (builder-created missing type) and prefer factory generate (may produce real prefab now)
+                bool wasStub = false;
+                try
+                {
+                    var stubFlag = _item.GetVariable(oldItem, "IMK_MissingType");
+                    if (stubFlag is bool b && b) wasStub = true;
+                }
+                catch { }
+
+                object newItemObj = null;
+                if (wasStub)
+                {
+                    // Attempt full generate (may succeed if type registered later)
+                    var gen = IMKDuckov.Factory.TryGenerateByTypeId(typeId);
+                    if (gen.Ok) newItemObj = gen.Value;
+                }
+                if (newItemObj == null)
+                {
+                    // Fallback to direct instantiate sync
+                    var instM = FindType("ItemStatsSystem.ItemAssetsCollection")?.GetMethod("InstantiateSync", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static, null, new[] { typeof(int) }, null);
+                    if (instM != null)
+                    {
+                        try { newItemObj = instM.Invoke(null, new object[] { typeId }); } catch { }
+                    }
+                }
+                if (newItemObj == null)
+                {
+                    // If still null try factory instantiation (with builder stub fallback)
+                    var instRes = IMKDuckov.Factory.TryInstantiateByTypeId(typeId);
+                    if (instRes.Ok) newItemObj = instRes.Value;
+                }
+                if (newItemObj == null) return RichResult<object>.Fail(ErrorCode.OperationFailed, "instantiate failed");
+
+                _persist?.RecordMeta(newItemObj, eff, writeVariables: true);
+                try { var tags = _item.GetTags(oldItem); if (tags != null && tags.Length > 0) _item.SetTags(newItemObj, tags); } catch { }
                 try
                 {
                     foreach (var v in _item.GetVariables(oldItem) ?? System.Array.Empty<VariableEntry>())
                     {
                         if (string.IsNullOrEmpty(v.Key)) continue;
-                        if (!v.Key.StartsWith("IMK_", System.StringComparison.Ordinal)) continue;
-                        _item.SetVariable(newItem, v.Key, v.Value, true);
+                        // Preserve IMK_ internal markers and custom variables
+                        if (v.Key.StartsWith("IMK_", System.StringComparison.Ordinal) || v.Key.StartsWith("Custom", System.StringComparison.Ordinal))
+                        {
+                            _item.SetVariable(newItemObj, v.Key, v.Value, true);
+                        }
                     }
                 }
                 catch { }
-                TrySet(newItem, EngineKeys.Property.Inspected, true);
+                TrySet(newItemObj, EngineKeys.Property.Inspected, true);
 
                 if (keepLocation && _inv.IsInInventory(oldItem))
                 {
@@ -51,14 +86,14 @@ namespace ItemModKit.Adapters.Duckov
                     int idx = _inv.IndexOf(inv, oldItem);
                     _inv.Detach(oldItem);
                     bool added = false;
-                    if (idx >= 0) added = _inv.AddAt(inv, newItem, idx);
-                    if (!added) added = _inv.AddAndMerge(inv, newItem);
-                    if (!added) SendToPlayer(newItem);
+                    if (idx >= 0) added = _inv.AddAt(inv, newItemObj, idx);
+                    if (!added) added = _inv.AddAndMerge(inv, newItemObj);
+                    if (!added) SendToPlayer(UnwrapToItem(newItemObj));
                 }
                 else
                 {
-                    bool plugged = _slot.TryPlugToCharacter(newItem, 0);
-                    if (!plugged) SendToPlayer(newItem);
+                    bool plugged = _slot.TryPlugToCharacter(newItemObj, 0);
+                    if (!plugged) SendToPlayer(UnwrapToItem(newItemObj));
                     try { _inv.Detach(oldItem); } catch { }
                 }
 
@@ -71,9 +106,9 @@ namespace ItemModKit.Adapters.Duckov
                 catch { }
 
                 TryRefreshInventories();
-                // ³Ö¾Ã»¯£º±ê¼Ç²¢Ç¿ÖÆË¢ĞÂ
-                try { IMKDuckov.MarkDirty(newItem, DirtyKind.Core | DirtyKind.Tags | DirtyKind.Variables, immediate: true); IMKDuckov.FlushDirty(newItem, force: true); } catch { }
-                return RichResult<object>.Success(newItem);
+                // æŒä¹…åŒ–ï¼šæ ‡è®°å¹¶å¼ºåˆ¶åˆ·æ–°
+                try { IMKDuckov.MarkDirty(newItemObj, DirtyKind.Core | DirtyKind.Tags | DirtyKind.Variables, immediate: true); IMKDuckov.FlushDirty(newItemObj, force: true); } catch { }
+                return RichResult<object>.Success(newItemObj);
             }
             catch (Exception ex)
             {
@@ -82,34 +117,34 @@ namespace ItemModKit.Adapters.Duckov
             }
         }
 
-        /// <summary>°²È«»ñÈ¡ÀàĞÍ ID£¨Ê§°Ü·µ»Ø 0£©¡£</summary>
+        /// <summary>å®‰å…¨è·å–ç±»å‹ IDï¼ˆå¤±è´¥è¿”å› 0ï¼‰ã€‚</summary>
         private static int SafeTypeId(object obj)
         {
             try { return IMKDuckov.Item.GetTypeId(obj); } catch { return 0; }
         }
 
-        /// <summary>ÈôÎ´Ìá¹© meta£¬Ôò´Ó¾ÉÎïÆ·£¨Ç¶Èë/±äÁ¿/Ö±½Ó¶ÁÈ¡£©ÍÆµ¼Ò»¸ö¡£</summary>
+        /// <summary>è‹¥æœªæä¾› metaï¼Œåˆ™ä»æ—§ç‰©å“ï¼ˆåµŒå…¥/å˜é‡/ç›´æ¥è¯»å–ï¼‰æ¨å¯¼ä¸€ä¸ªã€‚</summary>
         private ItemMeta EnsureMetaFromObject(ItemMeta meta, object old)
         {
             try
             {
                 if (meta != null) return meta;
-                try { if (_persist != null && _persist.TryExtractMeta(old, out var m) && m != null) return m; } catch { }
+                try { if (IMKDuckov.Persistence != null && IMKDuckov.Persistence.TryExtractMeta(old, out var m) && m != null) return m; } catch { }
                 return new ItemMeta
                 {
-                    NameKey = _item.GetDisplayNameRaw(old) ?? _item.GetName(old),
+                    NameKey = IMKDuckov.Item.GetDisplayNameRaw(old) ?? IMKDuckov.Item.GetName(old),
                     RemarkKey = null,
-                    TypeId = _item.GetTypeId(old),
-                    Quality = _item.GetQuality(old),
-                    DisplayQuality = _item.GetDisplayQuality(old),
-                    Value = _item.GetValue(old),
+                    TypeId = IMKDuckov.Item.GetTypeId(old),
+                    Quality = IMKDuckov.Item.GetQuality(old),
+                    DisplayQuality = IMKDuckov.Item.GetDisplayQuality(old),
+                    Value = IMKDuckov.Item.GetValue(old),
                     OwnerId = null
                 };
             }
             catch { return meta; }
         }
 
-        /// <summary>½«ÈÎÒâ°ü×°¶ÔÏó½â°üÎª Item ×é¼ş¡£</summary>
+        /// <summary>å°†ä»»æ„åŒ…è£…å¯¹è±¡è§£åŒ…ä¸º Item ç»„ä»¶ã€‚</summary>
         private static Item UnwrapToItem(object obj)
         {
             if (obj is Item it) return it;
@@ -128,7 +163,7 @@ namespace ItemModKit.Adapters.Duckov
         }
 
         private static void TrySet(object obj, string prop, object val) { try { obj.GetType().GetProperty(prop, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(obj, val, null); } catch { } }
-        /// <summary>½«ÎïÆ··¢ËÍ¸øÍæ¼Ò£¨¸ù¾İ¿ÉÓÃÖØÔØÆ¥Åäµ÷ÓÃ£©¡£</summary>
+        /// <summary>å°†ç‰©å“å‘é€ç»™ç©å®¶ï¼ˆæ ¹æ®å¯ç”¨é‡è½½åŒ¹é…è°ƒç”¨ï¼‰ã€‚</summary>
         private static void SendToPlayer(Item item)
         {
             try
@@ -140,7 +175,7 @@ namespace ItemModKit.Adapters.Duckov
             }
             catch { }
         }
-        /// <summary>Ë¢ĞÂÖ÷½Ç±³°üÓë²Ö¿âµÄ UI¡£</summary>
+        /// <summary>åˆ·æ–°ä¸»è§’èƒŒåŒ…ä¸ä»“åº“çš„ UIã€‚</summary>
         private static void TryRefreshInventories()
         {
             try

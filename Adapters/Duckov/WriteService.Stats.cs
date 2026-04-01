@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Reflection;
 using System.Globalization;
 using ItemModKit.Core;
@@ -6,12 +6,12 @@ using ItemModKit.Core;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// Ğ´Èë·şÎñ£¨Í³¼Æ Stat£©£ºÌá¹©ÉèÖÃ¡¢È·±£´æÔÚ¡¢ÒÆ³ıÒÔ¼°ÄÚ²¿¶àÖØ·´ÉäÆ¥ÅäÂß¼­¡£
+    /// å†™å…¥æœåŠ¡ï¼ˆç»Ÿè®¡ Statï¼‰ï¼šæä¾›è®¾ç½®ã€ç¡®ä¿å­˜åœ¨ã€ç§»é™¤ä»¥åŠå†…éƒ¨å¤šé‡åå°„åŒ¹é…é€»è¾‘ã€‚
     /// </summary>
     internal sealed partial class WriteService : IWriteService
     {
         // Stats write implementations
-        /// <summary>ÉèÖÃÖ¸¶¨ Stat µÄÊıÖµ£¬³¢ÊÔ¶àÖÖÂ·¾¶£¨ÊôĞÔ/·½·¨/×Ö¶Î£©¡£</summary>
+        /// <summary>è®¾ç½®æŒ‡å®š Stat çš„æ•°å€¼ï¼Œå°è¯•å¤šç§è·¯å¾„ï¼ˆå±æ€§/æ–¹æ³•/å­—æ®µï¼‰ã€‚</summary>
         public RichResult TrySetStatValue(object ownerItem, string statKey, float value)
         {
             try
@@ -30,7 +30,7 @@ namespace ItemModKit.Adapters.Duckov
                 }
                 if (stat == null) return RichResult.Fail(ErrorCode.NotFound, "stat not found");
 
-                // 1) Value ÊôĞÔ
+                // 1) Value å±æ€§
                 var setVal = DuckovReflectionCache.GetSetter(stat.GetType(), "Value", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (setVal != null)
                 {
@@ -40,7 +40,7 @@ namespace ItemModKit.Adapters.Duckov
                     return RichResult.Success();
                 }
 
-                // 2) ·½·¨ SetValue/Set/SetBaseValue
+                // 2) æ–¹æ³• SetValue/Set/SetBaseValue
                 foreach (var mname in new[] { "SetValue", "Set", "SetBaseValue" })
                 {
                     var m = DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(float) })
@@ -54,14 +54,14 @@ namespace ItemModKit.Adapters.Duckov
                     try { m.Invoke(stat, new[] { arg }); _item.ReapplyModifiers(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats); return RichResult.Success(); } catch { }
                 }
 
-                // 3) ±¸ÓÃÊôĞÔÃû
+                // 3) å¤‡ç”¨å±æ€§å
                 foreach (var pname in new[] { "BaseValue", "CurrentValue", "Amount" })
                 {
                     var setter = DuckovReflectionCache.GetSetter(stat.GetType(), pname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (setter != null) { setter(stat, value); _item.ReapplyModifiers(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats); return RichResult.Success(); }
                 }
 
-                // 4) ×Ö¶Îºó±¸
+                // 4) å­—æ®µåå¤‡
                 foreach (var fname in new[] { "Value", "m_Value", "_value", "BaseValue", "m_BaseValue", "_baseValue" })
                 {
                     var f = DuckovReflectionCache.GetField(stat.GetType(), fname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -83,7 +83,7 @@ namespace ItemModKit.Adapters.Duckov
             catch (System.Exception ex) { Log.Error("TrySetStatValue failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        /// <summary>È·±£ Stat ´æÔÚ£¨Èô²»´æÔÚÔòÊµÀı»¯²¢¼ÓÈë¼¯ºÏ£¬¿ÉÑ¡³õÊ¼Öµ£©¡£</summary>
+        /// <summary>ç¡®ä¿ Stat å­˜åœ¨ï¼ˆè‹¥ä¸å­˜åœ¨åˆ™å®ä¾‹åŒ–å¹¶åŠ å…¥é›†åˆï¼Œå¯é€‰åˆå§‹å€¼ï¼‰ã€‚</summary>
         public RichResult TryEnsureStat(object ownerItem, string statKey, float? initialValue = null)
         {
             try
@@ -109,7 +109,7 @@ namespace ItemModKit.Adapters.Duckov
                     IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats);
                     return RichResult.Success();
                 }
-                // Add(T) Ç©ÃûÍÆ¶ÏÀàĞÍ
+                // Add(T) ç­¾åæ¨æ–­ç±»å‹
                 var add = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (add == null || add.GetParameters().Length != 1)
                 {
@@ -176,7 +176,7 @@ namespace ItemModKit.Adapters.Duckov
             catch { }
         }
 
-        /// <summary>ÒÆ³ıÖ¸¶¨ Stat¡£</summary>
+        /// <summary>ç§»é™¤æŒ‡å®š Statã€‚</summary>
         public RichResult TryRemoveStat(object ownerItem, string statKey)
         {
             try

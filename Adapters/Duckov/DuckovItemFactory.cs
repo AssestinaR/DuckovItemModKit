@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Linq;
 using System.Reflection;
 using ItemModKit.Core;
@@ -6,15 +6,16 @@ using ItemModKit.Core;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// ÎïÆ·¹¤³§£º¸ºÔğ°´ TypeId ÊµÀı»¯/Éú³É¡¢´ÓÔ¤ÖÆÌå¿ËÂ¡¡¢×¢²á¶¯Ì¬ÌõÄ¿¡¢¸´ÖÆÓëÉ¾³ıÎïÆ·¡£
-    /// ×Ô¶¯ÊÊÅä Diablo2Totem µÄÎ¨Ò»Í¼ÌÚÓë Fallback Ô¤ÖÆÌå½âÎö¡£
+    /// ç‰©å“å·¥å‚ï¼šè´Ÿè´£æŒ‰ TypeId å®ä¾‹åŒ–/ç”Ÿæˆã€ä»é¢„åˆ¶ä½“å…‹éš†ã€æ³¨å†ŒåŠ¨æ€æ¡ç›®ã€å¤åˆ¶ä¸åˆ é™¤ç‰©å“ã€‚
+    /// è‡ªåŠ¨é€‚é… Diablo2Totem çš„å”¯ä¸€å›¾è…¾ä¸ Fallback é¢„åˆ¶ä½“è§£æã€‚
+    /// + 2024-Builder: é›†æˆ ItemBuilder æ–°å¢çš„å¤±è´¥æ—¶è‡ªåŠ¨ç”Ÿæˆ stubï¼ˆæ¨¡æ¿ï¼‰ç‰©å“åŠŸèƒ½
     /// </summary>
     internal sealed class DuckovItemFactory : IItemFactory
     {
         private readonly IItemAdapter _item;
         public DuckovItemFactory(IItemAdapter item) { _item = item; }
 
-        // ·´Éä»º´æ
+        // åå°„ç¼“å­˜
         private static Type s_ItemAssetsCollection;
         private static MethodInfo s_InstantiateSync;
         private static MethodInfo s_Instantiate;
@@ -28,6 +29,19 @@ namespace ItemModKit.Adapters.Duckov
         private static Type s_FallbackTypeResolver;
         private static MethodInfo s_TryGetOrCreateFallbackPrefab;
 
+        // ItemBuilder reflection (optional, new game version)
+        private static Type s_ItemBuilderType; // Duckov.ItemBuilders.ItemBuilder
+        private static MethodInfo s_BuilderNew; // static ItemBuilder New()
+        private static MethodInfo s_BuilderTypeId; // ItemBuilder TypeID(int)
+        private static MethodInfo s_BuilderDisableStacking; // ItemBuilder DisableStacking()
+        private static MethodInfo s_BuilderInstantiate; // ItemBuilder Instantiate()
+        private static bool s_BuilderScanned;
+
+        // Marker variable keys for stub items
+        private const string VarMissingType = "IMK_MissingType";
+        private const string VarOriginalTypeId = "IMK_OriginalTypeId";
+        private const string VarBuilderInit = "IMK_BuilderInit";
+
         private static void EnsureCoreTypes()
         {
             if (s_ItemAssetsCollection == null)
@@ -39,6 +53,7 @@ namespace ItemModKit.Adapters.Duckov
                     s_InstantiateSync = DuckovReflectionCache.GetMethod(s_ItemAssetsCollection, "InstantiateSync", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new[] { typeof(int) });
                     s_Instantiate = DuckovReflectionCache.GetMethod(s_ItemAssetsCollection, "Instantiate", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new[] { typeof(int) });
                     s_GetPrefab = DuckovReflectionCache.GetMethod(s_ItemAssetsCollection, "GetPrefab", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new[] { typeof(int) });
+                    // be tolerant to various signatures, prefer any method named AddDynamicEntry
                     s_AddDynamicEntry = DuckovReflectionCache.GetMethod(s_ItemAssetsCollection, "AddDynamicEntry", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 }
             }
@@ -55,17 +70,71 @@ namespace ItemModKit.Adapters.Duckov
                 s_FallbackTypeResolver = DuckovTypeUtils.FindType("Diablo2Totem.Services.FallbackTypeResolverService") ?? DuckovTypeUtils.FindType("DisplayItemValue.Services.FallbackTypeResolverService");
                 if (s_FallbackTypeResolver != null)
                 {
-                    s_TryGetOrCreateFallbackPrefab = DuckovReflectionCache.GetMethod(s_FallbackTypeResolver, "TryGetOrCreateFallbackPrefab", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new[] { typeof(int), s_ItemType ?? typeof(object) });
-                    if (s_TryGetOrCreateFallbackPrefab == null)
+                    // out parameter type varies; only match first arg to int
+                    foreach (var m in s_FallbackTypeResolver.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
                     {
-                        // ¶µµ×£ºÈÎÒâÁ½¸ö²ÎÊıµÄÖØÔØ
-                        s_TryGetOrCreateFallbackPrefab = DuckovReflectionCache.GetMethod(s_FallbackTypeResolver, "TryGetOrCreateFallbackPrefab", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                        if (m.Name != "TryGetOrCreateFallbackPrefab") continue;
+                        var ps = m.GetParameters();
+                        if (ps.Length >= 1 && ps[0].ParameterType == typeof(int)) { s_TryGetOrCreateFallbackPrefab = m; break; }
                     }
                 }
             }
+            EnsureBuilderTypes();
         }
 
-        /// <summary>Í¨¹ı TypeId ÊµÀı»¯ÎïÆ·£¨ÓÅÏÈÍ¬²½ InstantiateSync£©¡£</summary>
+        private static void EnsureBuilderTypes()
+        {
+            if (s_BuilderScanned) return;
+            s_BuilderScanned = true;
+            try
+            {
+                s_ItemBuilderType = DuckovTypeUtils.FindType("Duckov.ItemBuilders.ItemBuilder") ?? DuckovTypeUtils.FindType("ItemBuilder");
+                if (s_ItemBuilderType == null) return;
+                s_BuilderNew = DuckovReflectionCache.GetMethod(s_ItemBuilderType, "New", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                // Instance fluent methods
+                s_BuilderTypeId = DuckovReflectionCache.GetMethod(s_ItemBuilderType, "TypeID", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(int) });
+                s_BuilderDisableStacking = DuckovReflectionCache.GetMethod(s_ItemBuilderType, "DisableStacking", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes);
+                s_BuilderInstantiate = DuckovReflectionCache.GetMethod(s_ItemBuilderType, "Instantiate", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes);
+            }
+            catch { s_ItemBuilderType = null; }
+        }
+
+        private static bool BuilderAvailable => s_ItemBuilderType != null && s_BuilderNew != null && s_BuilderInstantiate != null;
+
+        /// <summary>
+        /// å°è¯•åˆ›å»ºä¸€ä¸ª ItemBuilder çš„ Stub å¯¹è±¡ï¼ˆæ¨¡æ¿ç‰©å“ï¼‰
+        /// ã€åœ¨æ— æ³•è§£æ TypeId æˆ–å®ä¾‹åŒ– prefab æ—¶è‡ªåŠ¨è°ƒç”¨ã€‘
+        /// </summary>
+        private object TryCreateStubWithBuilder(int typeId)
+        {
+            if (!BuilderAvailable || typeId <= 0) return null;
+            try
+            {
+                var builder = s_BuilderNew.Invoke(null, null);
+                if (builder == null) return null;
+                try { s_BuilderTypeId?.Invoke(builder, new object[] { typeId }); } catch { }
+                try { s_BuilderDisableStacking?.Invoke(builder, null); } catch { }
+                var item = s_BuilderInstantiate.Invoke(builder, null);
+                if (item == null) return null;
+                // Mark stub metadata
+                try
+                {
+                    var adapter = IMKDuckov.Item; // use global facade
+                    adapter.SetName(item, "MissingType_" + typeId);
+                    adapter.SetDisplayNameRaw(item, "MissingType_" + typeId);
+                    adapter.SetTypeId(item, typeId);
+                    adapter.SetVariable(item, VarMissingType, true, true);
+                    adapter.SetVariable(item, VarOriginalTypeId, typeId, true);
+                    adapter.SetVariable(item, VarBuilderInit, true, true);
+                }
+                catch { }
+                try { IMKDuckov.MarkDirty(item, DirtyKind.Core | DirtyKind.Variables); } catch { }
+                return item;
+            }
+            catch (Exception ex) { Log.Warn("ItemBuilder stub create failed: " + ex.Message); return null; }
+        }
+
+        /// <summary>é€šè¿‡ TypeId å®ä¾‹åŒ–ç‰©å“ï¼ˆä¼˜å…ˆåŒæ­¥ InstantiateSyncï¼‰ã€‚</summary>
         public RichResult<object> TryInstantiateByTypeId(int typeId)
         {
             try
@@ -74,14 +143,40 @@ namespace ItemModKit.Adapters.Duckov
                 if (s_ItemAssetsCollection == null) return RichResult<object>.Fail(ErrorCode.DependencyMissing, "ItemAssetsCollection not found");
                 var invoker = s_InstantiateSync ?? s_Instantiate;
                 if (invoker == null) return RichResult<object>.Fail(ErrorCode.NotSupported, "Instantiate method not found");
-                var obj = invoker.Invoke(null, new object[] { typeId });
+                object obj = null;
+                bool instantiateFailed = false;
+                try { obj = invoker.Invoke(null, new object[] { typeId }); }
+                catch (TargetInvocationException)
+                {
+                    instantiateFailed = true;
+                    // If instantiate failed due to missing prefab, try to register a fallback, then retry once
+                    if (s_TryGetOrCreateFallbackPrefab != null)
+                    {
+                        try
+                        {
+                            var ps = s_TryGetOrCreateFallbackPrefab.GetParameters();
+                            var args = ps.Length == 1 ? new object[] { typeId } : new object[] { typeId, null };
+                            var ok = Convert.ToBoolean(s_TryGetOrCreateFallbackPrefab.Invoke(null, args));
+                            if (ok)
+                            {
+                                try { obj = invoker.Invoke(null, new object[] { typeId }); } catch { }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                if (obj == null && (instantiateFailed || BuilderAvailable))
+                {
+                    var stub = TryCreateStubWithBuilder(typeId);
+                    if (stub != null) return RichResult<object>.Success(stub);
+                }
                 if (obj == null) return RichResult<object>.Fail(ErrorCode.OperationFailed, "Instantiate returned null");
                 return RichResult<object>.Success(obj);
             }
             catch (Exception ex) { Log.Error("TryInstantiateByTypeId failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        /// <summary>´ÓÔ¤ÖÆÌå¿ËÂ¡Ò»¸öÊµÀı¡£</summary>
+        /// <summary>ä»é¢„åˆ¶ä½“å…‹éš†ä¸€ä¸ªå®ä¾‹ã€‚</summary>
         public RichResult<object> TryInstantiateFromPrefab(object prefab)
         {
             try
@@ -96,10 +191,10 @@ namespace ItemModKit.Adapters.Duckov
         }
 
         /// <summary>
-        /// ³¢ÊÔ°´ TypeId Éú³É£º
-        /// 1) ÏÈ×ß Unique Â·¾¶£¨Èô¿ÉÓÃ£©
-        /// 2) ÈôÎŞÔ¤ÖÆÌå£¬³¢ÊÔÍ¨¹ı Fallback ½âÎö²¢×¢²á¶¯Ì¬ÌõÄ¿
-        /// 3) ×îÖÕµ÷ÓÃÊµÀı»¯
+        /// å°è¯•æŒ‰ TypeId ç”Ÿæˆï¼š
+        /// 1) å…ˆèµ° Unique è·¯å¾„ï¼ˆè‹¥å¯ç”¨ï¼‰
+        /// 2) è‹¥æ— é¢„åˆ¶ä½“ï¼Œå°è¯•é€šè¿‡ Fallback è§£æå¹¶æ³¨å†ŒåŠ¨æ€æ¡ç›®
+        /// 3) æœ€ç»ˆè°ƒç”¨å®ä¾‹åŒ–
         /// </summary>
         public RichResult<object> TryGenerateByTypeId(int typeId)
         {
@@ -117,7 +212,7 @@ namespace ItemModKit.Adapters.Duckov
                     catch { }
                 }
 
-                // 2) prefab È·ÈÏ/´´½¨
+                // 2) prefab ç¡®è®¤/åˆ›å»º
                 object prefab = null;
                 bool hasPrefab = false;
                 try { var pf = s_GetPrefab?.Invoke(null, new object[] { typeId }); hasPrefab = pf != null; if (hasPrefab) prefab = pf; } catch { }
@@ -125,29 +220,32 @@ namespace ItemModKit.Adapters.Duckov
                 {
                     try
                     {
-                        var args = (s_TryGetOrCreateFallbackPrefab.GetParameters().Length >= 2)
-                            ? new object[] { typeId, null }
-                            : new object[] { typeId };
+                        var ps = s_TryGetOrCreateFallbackPrefab.GetParameters();
+                        var args = ps.Length == 1 ? new object[] { typeId } : new object[] { typeId, null };
                         var ok = Convert.ToBoolean(s_TryGetOrCreateFallbackPrefab.Invoke(null, args));
                         if (ok && args.Length >= 2) prefab = args[1];
-                        if (ok && prefab != null && s_AddDynamicEntry != null)
-                        {
-                            try { s_AddDynamicEntry.Invoke(null, new[] { prefab }); } catch { }
-                        }
+                        if (!ok) hasPrefab = false; else hasPrefab = true;
                     }
                     catch { }
                 }
 
-                // 3) ÊµÀı»¯
+                // 3) å®ä¾‹åŒ–
                 var inst = TryInstantiateByTypeId(typeId);
                 if (inst.Ok) return inst;
+
+                // 4) å°è¯•ç›´æ¥è¿”å› Builder Stub ä»¥åº”å¯¹æœªçŸ¥ TypeId
+                if (BuilderAvailable)
+                {
+                    var stub = TryCreateStubWithBuilder(typeId);
+                    if (stub != null) return RichResult<object>.Success(stub);
+                }
 
                 return RichResult<object>.Fail(inst.Code, inst.Error ?? "generate failed");
             }
             catch (Exception ex) { Log.Error("TryGenerateByTypeId failed", ex); return RichResult<object>.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        /// <summary>Ïò ItemAssetsCollection ×¢²áÒ»¸ö¶¯Ì¬ÌõÄ¿£¨prefab£©¡£</summary>
+        /// <summary>å‘ ItemAssetsCollection æ³¨å†Œä¸€ä¸ªåŠ¨æ€æ¡ç›®ï¼ˆprefabï¼‰ã€‚</summary>
         public RichResult TryRegisterDynamicEntry(object prefab)
         {
             try
@@ -161,7 +259,7 @@ namespace ItemModKit.Adapters.Duckov
             catch (Exception ex) { Log.Error("TryRegisterDynamicEntry failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
 
-        /// <summary>¿ËÂ¡Ò»¸öÎïÆ·£¨¸´ÖÆ GameObject ²¢È¡Í¬ÀàĞÍ×é¼ş£©¡£</summary>
+        /// <summary>å…‹éš†ä¸€ä¸ªç‰©å“ï¼ˆå¤åˆ¶ GameObject å¹¶å–åŒç±»å‹ç»„ä»¶ï¼‰ã€‚</summary>
         public RichResult<object> TryCloneItem(object item)
         {
             try
@@ -177,7 +275,7 @@ namespace ItemModKit.Adapters.Duckov
         }
 
         /// <summary>
-        /// É¾³ıÒ»¸öÎïÆ·£ºÏú»Ù GameObject Ç°ÏÈÇ¿ÖÆË¢ĞÂ³Ö¾Ã»¯£¬±ÜÃâ×îºóĞŞ¸Ä¶ªÊ§¡£
+        /// åˆ é™¤ä¸€ä¸ªç‰©å“ï¼šé”€æ¯ GameObject å‰å…ˆå¼ºåˆ¶åˆ·æ–°æŒä¹…åŒ–ï¼Œé¿å…æœ€åä¿®æ”¹ä¸¢å¤±ã€‚
         /// </summary>
         public RichResult TryDeleteItem(object item)
         {

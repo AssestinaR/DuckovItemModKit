@@ -1,0 +1,6 @@
+﻿# 每行一个相对路径；执行 Move-LegacyFilesToBak.ps1 时会按此清单搬到 bak/legacy 下
+# 建议先看 docs/imk-legacy-candidates.md，再决定是否执行。
+# 当前已提供一个可直接执行的安全批次：scripts/legacy-files.batch1-safe.txt
+# 例子：
+# Adapters/Duckov/Atomic.cs
+# Core/Clone.cs

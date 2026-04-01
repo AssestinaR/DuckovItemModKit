@@ -1,4 +1,4 @@
-using ItemModKit.Core;
+﻿using ItemModKit.Core;
 using ItemStatsSystem;
 using System.Reflection;
 using UnityEngine;

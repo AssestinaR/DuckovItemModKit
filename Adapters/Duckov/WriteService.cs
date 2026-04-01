@@ -1,4 +1,4 @@
-using ItemModKit.Core;
+﻿using ItemModKit.Core;
 
 namespace ItemModKit.Adapters.Duckov
 {

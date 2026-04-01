@@ -1,4 +1,4 @@
-using System;
+Ôªøusing System;
 using System.Collections.Generic;
 using System.Reflection;
 using ItemModKit.Core;
@@ -6,123 +6,182 @@ using ItemModKit.Core;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// –¥»Î∑˛ŒÒ£®≤€Œª Slots£©£∫Ã·π©≤Â∞Œ°¢“∆∂Ø°¢‘ˆ…æ≤€Œªµ»≤Ÿ◊˜£¨≤¢∑¢≥ˆ±‰∏¸Õ®÷™”Î‘‡±Íº«°£
+    /// ÂÜôÂÖ•ÊúçÂä°ÔºàÊßΩ‰Ωç SlotsÔºâÔºöÊèê‰æõÊèíÊãî„ÄÅÁßªÂä®„ÄÅÂ¢ûÂà†ÊßΩ‰ΩçÁ≠âÊìç‰ΩúÔºåÂπ∂ÂèëÂá∫ÂèòÊõ¥ÈÄöÁü•‰∏éËÑèÊ†áËÆ∞„ÄÇ
     /// </summary>
     internal sealed partial class WriteService : IWriteService
     {
         // Slots write implementations
 
-        private static object ResolveSlotByKeyOrIndex(object slots, string slotKey)
+        private static object ResolveSlot(object slots, string slotKey)
         {
             if (slots == null || string.IsNullOrEmpty(slotKey)) return null;
             var t = slots.GetType();
-            // GetSlot(string)
+            // Prefer GetSlot(string)
             var getSlotStr = DuckovReflectionCache.GetMethod(t, "GetSlot", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
             if (getSlotStr != null)
             {
-                try { return getSlotStr.Invoke(slots, new object[] { slotKey }); } catch { }
+                try { var v = getSlotStr.Invoke(slots, new object[] { slotKey }); if (v != null) return v; } catch { }
             }
-            // GetSlot(int)
-            var getSlotInt = DuckovReflectionCache.GetMethod(t, "GetSlot", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(int) });
-            if (getSlotInt != null)
+            // Fallback enumeration
+            try
             {
-                if (int.TryParse(slotKey, out var idx))
+                var enumerable = slots as System.Collections.IEnumerable;
+                if (enumerable != null)
                 {
-                    try { return getSlotInt.Invoke(slots, new object[] { idx }); } catch { }
-                }
-                int count = 0;
-                try { var p = DuckovReflectionCache.GetProp(t, "Count", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (p != null) count = Convert.ToInt32(p.GetValue(slots, null)); } catch { count = 0; }
-                if (count <= 0)
-                {
-                    try { var itemsP = DuckovReflectionCache.GetProp(t, "Items", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); var col = itemsP?.GetValue(slots, null) as System.Collections.ICollection; if (col != null) count = col.Count; } catch { }
-                }
-                for (int i = 0; i < count; i++)
-                {
-                    object s = null; try { s = getSlotInt.Invoke(slots, new object[] { i }); } catch { }
-                    if (s == null) continue;
-                    try
+                    foreach (var s in enumerable)
                     {
+                        if (s == null) continue;
                         var keyP = DuckovReflectionCache.GetProp(s.GetType(), "Key", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         var keyV = keyP?.GetValue(s, null) as string;
                         if (!string.IsNullOrEmpty(keyV) && string.Equals(keyV, slotKey, StringComparison.OrdinalIgnoreCase)) return s;
                     }
-                    catch { }
                 }
             }
+            catch { }
             return null;
         }
 
-        /// <summary>œÚ≤€Œª≤Â»Î◊”ŒÔ∆∑°£</summary>
+        private static bool TryGetSlotContent(object slot, out object content)
+        {
+            content = null;
+            if (slot == null) return false;
+            try
+            {
+                var cp = DuckovReflectionCache.GetProp(slot.GetType(), "Content", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                content = cp?.GetValue(slot, null);
+                return content != null;
+            }
+            catch { return false; }
+        }
+
+        private static bool CanPlug(object slot, object childItem)
+        {
+            try
+            {
+                var m = DuckovReflectionCache.GetMethod(slot.GetType(), "CanPlug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { childItem?.GetType() });
+                if (m != null)
+                {
+                    var r = m.Invoke(slot, new[] { childItem });
+                    if (r is bool b) return b;
+                }
+            }
+            catch { }
+            return true; // assume allowed if we cannot check
+        }
+
+        private static (MethodInfo plug, bool hasOutPrev) ResolvePlugMethod(object slot)
+        {
+            var st = slot.GetType();
+            // Look for bool Plug(Item item, out Item previous)
+            try
+            {
+                var methods = st.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                foreach (var m in methods)
+                {
+                    if (m.Name != "Plug") continue;
+                    var ps = m.GetParameters();
+                    if (ps.Length == 2 && ps[1].IsOut)
+                    {
+                        if (m.ReturnType == typeof(bool)) return (m, true);
+                    }
+                    if (ps.Length == 1 && m.ReturnType == typeof(bool)) return (m, false);
+                }
+            }
+            catch { }
+            return (null, false);
+        }
+
+        /// <summary>ÂêëÊßΩ‰ΩçÊèíÂÖ•Â≠êÁâ©ÂìÅ„ÄÇ</summary>
         public RichResult TryPlugIntoSlot(object ownerItem, string slotKey, object childItem)
         {
             try
             {
-                if (ownerItem == null || childItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "null args");
-                if (string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slotKey is null");
+                if (ownerItem == null || childItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.args");
+                if (string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.key");
                 var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
-                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "no Slots on owner");
-                var slot = ResolveSlotByKeyOrIndex(slots, slotKey);
-                if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot not found");
-                var plug = DuckovReflectionCache.GetMethod(slot.GetType(), "Plug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                           ?? DuckovReflectionCache.GetMethod(slot.GetType(), "SetContent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (plug == null) return RichResult.Fail(ErrorCode.NotSupported, "Plug/SetContent not found");
-                if (plug.Name == "SetContent") plug.Invoke(slot, new object[] { childItem }); else plug.Invoke(slot, new object[] { childItem });
+                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
+                var slot = ResolveSlot(slots, slotKey);
+                if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot.notfound");
+                if (!CanPlug(slot, childItem)) return RichResult.Fail(ErrorCode.Conflict, "slot.incompatible");
+                var (plug, hasOutPrev) = ResolvePlugMethod(slot);
+                if (plug == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.no_plug");
+                object prevOut = null;
+                bool result;
+                if (hasOutPrev)
+                {
+                    var parameters = new object[] { childItem, null };
+                    result = (bool)plug.Invoke(slot, parameters);
+                    prevOut = parameters[1];
+                }
+                else
+                {
+                    var r = plug.Invoke(slot, new object[] { childItem });
+                    result = r is bool b && b;
+                }
+                if (!result) return RichResult.Fail(ErrorCode.OperationFailed, "slot.plug.failed");
                 NotifySlotAndChildChanged(ownerItem);
                 IMKDuckov.MarkDirty(ownerItem, DirtyKind.Slots);
                 return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryPlugIntoSlot failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>¥”≤€Œª∞Œ≥ˆ◊”ŒÔ∆∑°£</summary>
+        /// <summary>‰ªéÊßΩ‰ΩçÊãîÂá∫Â≠êÁâ©ÂìÅ„ÄÇ</summary>
         public RichResult TryUnplugFromSlot(object ownerItem, string slotKey)
         {
             try
             {
-                if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
-                if (string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slotKey null");
+                if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.owner");
+                if (string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.key");
                 var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
-                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "no Slots on owner");
-                var slot = ResolveSlotByKeyOrIndex(slots, slotKey);
-                if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot not found");
-                var unplug = DuckovReflectionCache.GetMethod(slot.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                             ?? DuckovReflectionCache.GetMethod(slot.GetType(), "SetContent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (unplug == null) return RichResult.Fail(ErrorCode.NotSupported, "Unplug/SetContent not found");
-                if (unplug.Name == "SetContent") unplug.Invoke(slot, new object[] { null }); else unplug.Invoke(slot, null);
+                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
+                var slot = ResolveSlot(slots, slotKey);
+                if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot.notfound");
+                var unplug = DuckovReflectionCache.GetMethod(slot.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (unplug == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.no_unplug");
+                unplug.Invoke(slot, null);
                 NotifySlotAndChildChanged(ownerItem);
                 IMKDuckov.MarkDirty(ownerItem, DirtyKind.Slots);
                 return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryUnplugFromSlot failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>‘⁄Õ¨“ªŒÔ∆∑…œ¥”“ª∏ˆ≤€Œª“∆∂ØµΩ¡Ì“ª∏ˆ≤€Œª°£</summary>
+        /// <summary>Âú®Âêå‰∏ÄÁâ©ÂìÅ‰∏ä‰ªé‰∏Ä‰∏™ÊßΩ‰ΩçÁßªÂä®Âà∞Âè¶‰∏Ä‰∏™ÊßΩ‰Ωç„ÄÇ</summary>
         public RichResult TryMoveBetweenSlots(object ownerItem, string fromSlotKey, string toSlotKey)
         {
             try
             {
-                if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
-                if (string.IsNullOrEmpty(fromSlotKey) || string.IsNullOrEmpty(toSlotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slotKey null");
+                if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.owner");
+                if (string.IsNullOrEmpty(fromSlotKey) || string.IsNullOrEmpty(toSlotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.key");
                 var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
-                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "no Slots on owner");
-                var from = ResolveSlotByKeyOrIndex(slots, fromSlotKey);
-                var to = ResolveSlotByKeyOrIndex(slots, toSlotKey);
-                if (from == null || to == null) return RichResult.Fail(ErrorCode.NotFound, "slot not found");
-                var contentProp = DuckovReflectionCache.GetProp(from.GetType(), "Content", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var content = contentProp?.GetValue(from, null);
-                if (content == null) return RichResult.Fail(ErrorCode.NotFound, "no content in from-slot");
-                var unplug = DuckovReflectionCache.GetMethod(from.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                             ?? DuckovReflectionCache.GetMethod(from.GetType(), "SetContent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var plug = DuckovReflectionCache.GetMethod(to.GetType(), "Plug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                           ?? DuckovReflectionCache.GetMethod(to.GetType(), "SetContent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (unplug == null || plug == null) return RichResult.Fail(ErrorCode.NotSupported, "Unplug/Plug not found");
-                if (unplug.Name == "SetContent") unplug.Invoke(from, new object[] { null }); else unplug.Invoke(from, null);
-                if (plug.Name == "SetContent") plug.Invoke(to, new object[] { content }); else plug.Invoke(to, new object[] { content });
+                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
+                var from = ResolveSlot(slots, fromSlotKey);
+                var to = ResolveSlot(slots, toSlotKey);
+                if (from == null || to == null) return RichResult.Fail(ErrorCode.NotFound, "slot.notfound");
+                if (!TryGetSlotContent(from, out var content)) return RichResult.Fail(ErrorCode.NotFound, "slot.from.empty");
+                if (!CanPlug(to, content)) return RichResult.Fail(ErrorCode.Conflict, "slot.to.incompatible");
+                // Unplug source
+                var unplug = DuckovReflectionCache.GetMethod(from.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (unplug == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.from.no_unplug");
+                unplug.Invoke(from, null);
+                // Plug target
+                var (plug, hasOutPrev) = ResolvePlugMethod(to); if (plug == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.to.no_plug");
+                bool ok;
+                if (hasOutPrev)
+                {
+                    var parameters = new object[] { content, null }; ok = (bool)plug.Invoke(to, parameters); // ignore previous replaced item for move
+                }
+                else
+                {
+                    var r = plug.Invoke(to, new[] { content }); ok = r is bool b && b;
+                }
+                if (!ok) return RichResult.Fail(ErrorCode.OperationFailed, "slot.move.plug_failed");
                 NotifySlotAndChildChanged(ownerItem);
                 IMKDuckov.MarkDirty(ownerItem, DirtyKind.Slots);
                 return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryMoveBetweenSlots failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>–¬‘ˆ“ª∏ˆ≤€Œª£®◊‘∂Ø»•÷ÿ Key£©°£</summary>
+        /// <summary>Êñ∞Â¢û‰∏Ä‰∏™ÊßΩ‰ΩçÔºàËá™Âä®ÂéªÈáç KeyÔºâ„ÄÇ</summary>
         public RichResult TryAddSlot(object ownerItem, SlotCreateOptions options)
         {
             try
@@ -137,7 +196,7 @@ namespace ItemModKit.Adapters.Duckov
                 var slot = Activator.CreateInstance(slotType);
                 if (slot == null) return RichResult.Fail(ErrorCode.OperationFailed, "create slot failed");
                 DuckovTypeUtils.SetProp(slot, "Key", finalKey);
-                DuckovTypeUtils.SetProp(slot, "DisplayName", string.IsNullOrEmpty(options.DisplayName) ? finalKey : options.DisplayName);
+                // DisplayName in game derives from requireTags[0], avoid forcing here.
                 if (options.SlotIcon != null) DuckovTypeUtils.SetProp(slot, "SlotIcon", options.SlotIcon);
                 if (options.RequireTags != null) DuckovTypeUtils.SetProp(slot, "requireTags", options.RequireTags);
                 if (options.ExcludeTags != null) DuckovTypeUtils.SetProp(slot, "excludeTags", options.ExcludeTags);
@@ -157,7 +216,7 @@ namespace ItemModKit.Adapters.Duckov
             }
             catch (Exception ex) { Log.Error("TryAddSlot failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
-        /// <summary>“∆≥˝“ª∏ˆ≤€Œª£®»Á”–ƒ⁄»›œ»∞Œ≥ˆ£©°£</summary>
+        /// <summary>ÁßªÈô§‰∏Ä‰∏™ÊßΩ‰ΩçÔºàÂ¶ÇÊúâÂÜÖÂÆπÂÖàÊãîÂá∫Ôºâ„ÄÇ</summary>
         public RichResult TryRemoveSlot(object ownerItem, string slotKey)
         {
             try
@@ -166,17 +225,17 @@ namespace ItemModKit.Adapters.Duckov
                 if (string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slotKey null");
                 var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
                 if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "no Slots on owner");
-                var slot = ResolveSlotByKeyOrIndex(slots, slotKey);
+                var slot = ResolveSlot(slots, slotKey);
                 if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot not found");
                 var contentProp = DuckovReflectionCache.GetProp(slot.GetType(), "Content", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 var content = contentProp?.GetValue(slot, null);
                 if (content != null)
                 {
                     var unplug = DuckovReflectionCache.GetMethod(slot.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                                 ?? DuckovReflectionCache.GetMethod(slot.GetType(), "SetContent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                 ;
                     if (unplug != null)
                     {
-                        if (unplug.Name == "SetContent") unplug.Invoke(slot, new object[] { null }); else unplug.Invoke(slot, null);
+                        unplug.Invoke(slot, null);
                     }
                 }
                 var rem = DuckovReflectionCache.GetMethod(slots.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -187,6 +246,40 @@ namespace ItemModKit.Adapters.Duckov
                 return RichResult.Success();
             }
             catch (Exception ex) { Log.Error("TryRemoveSlot failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
+        }
+
+        /// <summary>ËÆæÁΩÆÊßΩ‰ΩçÂõæÊ†áÔºà‰ªÖÁ©∫ÊßΩÊàñÂº∫Âà∂Ë¶ÜÁõñÔºâ„ÄÇ</summary>
+        public RichResult TrySetSlotIcon(object ownerItem, string slotKey, object sprite)
+        {
+            try
+            {
+                if (ownerItem == null || string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.args");
+                var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
+                var slot = ResolveSlot(slots, slotKey); if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot.notfound");
+                DuckovTypeUtils.SetProp(slot, "SlotIcon", sprite);
+                NotifySlotAndChildChanged(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Slots);
+                return RichResult.Success();
+            }
+            catch (Exception ex) { Log.Error("TrySetSlotIcon failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
+        }
+
+        /// <summary>ËÆæÁΩÆÊßΩ‰ΩçÊ†áÁ≠æÈôêÂà∂Ôºà‰ªÖÂΩìÊßΩÊú™Âç†Áî®Ôºâ„ÄÇ</summary>
+        public RichResult TrySetSlotTags(object ownerItem, string slotKey, string[] requireTagKeys, string[] excludeTagKeys)
+        {
+            try
+            {
+                if (ownerItem == null || string.IsNullOrEmpty(slotKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.args");
+                var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
+                var slot = ResolveSlot(slots, slotKey); if (slot == null) return RichResult.Fail(ErrorCode.NotFound, "slot.notfound");
+                if (TryGetSlotContent(slot, out _)) return RichResult.Fail(ErrorCode.Conflict, "slot.occupied");
+                DuckovTypeUtils.SetProp(slot, "requireTags", requireTagKeys);
+                DuckovTypeUtils.SetProp(slot, "excludeTags", excludeTagKeys);
+                NotifySlotAndChildChanged(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Slots);
+                return RichResult.Success();
+            }
+            catch (Exception ex) { Log.Error("TrySetSlotTags failed", ex); return RichResult.Fail(ErrorCode.OperationFailed, ex.Message); }
         }
     }
 }

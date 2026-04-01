@@ -1,21 +1,20 @@
-using System;
+ï»¿using System;
 using System.Collections.Generic;
-using System.Reflection;
 using ItemModKit.Core;
 
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// ¿ËÂ¡¹ÜÏß£ºÖ§³Ö TreeData Óë Unity Á½ÖÖ¿ËÂ¡²ßÂÔ£¬Ëæºó¿É°´ĞèºÏ²¢±äÁ¿/¸´ÖÆ±êÇ©²¢³¢ÊÔ·ÅÈë±³°ü¡£
+    /// å…‹éš†ç®¡çº¿ï¼šæ”¯æŒ TreeData ä¸ Unity ä¸¤ç§å…‹éš†ç­–ç•¥ï¼Œéšåå¯æŒ‰éœ€åˆå¹¶å˜é‡/å¤åˆ¶æ ‡ç­¾å¹¶å°è¯•æ”¾å…¥èƒŒåŒ…ã€‚
     /// </summary>
     internal sealed class DuckovClonePipeline : IClonePipeline
     {
         /// <summary>
-        /// ´ÓÔ´ÎïÆ·¿ËÂ¡Ò»¸ö¸±±¾£¬°´²ßÂÔÍê³É¿ËÂ¡²¢³¢ÊÔ·ÅÈëÄ¿±ê±³°ü¡£
+        /// ä»æºç‰©å“å…‹éš†ä¸€ä¸ªå‰¯æœ¬ï¼ŒæŒ‰ç­–ç•¥å®Œæˆå…‹éš†å¹¶å°è¯•æ”¾å…¥ç›®æ ‡èƒŒåŒ…ã€‚
         /// </summary>
-        /// <param name="source">Ô´ÎïÆ·¡£</param>
-        /// <param name="options">¹ÜÏßÑ¡Ïî£¨¿ÉÎª null£©¡£</param>
-        /// <returns>°üº¬ĞÂÎïÆ·¡¢·ÅÖÃÇé¿öÓëÕï¶ÏĞÅÏ¢µÄ½á¹û¡£</returns>
+        /// <param name="source">æºç‰©å“ã€‚</param>
+        /// <param name="options">ç®¡çº¿é€‰é¡¹ï¼ˆå¯ä¸º nullï¼‰ã€‚</param>
+        /// <returns>åŒ…å«æ–°ç‰©å“ã€æ”¾ç½®æƒ…å†µä¸è¯Šæ–­ä¿¡æ¯çš„ç»“æœã€‚</returns>
         public RichResult<ClonePipelineResult> TryCloneToInventory(object source, ClonePipelineOptions options = null)
         {
             options = options ?? new ClonePipelineOptions();
@@ -23,7 +22,7 @@ namespace ItemModKit.Adapters.Duckov
             var diag = options.Diagnostics ? new Dictionary<string, object>() : null;
 
             object newItem = null; string used = null; string err = null;
-            // ²ßÂÔÑ¡Ôñ
+            // ç­–ç•¥é€‰æ‹©
             if (options.Strategy == CloneStrategy.TreeData || options.Strategy == CloneStrategy.Auto)
             {
                 var r = DuckovTreeDataService.TryCloneFromSource(source);
@@ -38,7 +37,7 @@ namespace ItemModKit.Adapters.Duckov
             }
             if (newItem == null) return RichResult<ClonePipelineResult>.Fail(ErrorCode.OperationFailed, err ?? "clone failed");
 
-            // ±äÁ¿ºÏ²¢²ßÂÔ£¨Ä¬ÈÏ½öºÏ²¢È±Ê§¼ü£©Óë±êÇ©¸´ÖÆ
+            // å˜é‡åˆå¹¶ç­–ç•¥ï¼ˆé»˜è®¤ä»…åˆå¹¶ç¼ºå¤±é”®ï¼‰ä¸æ ‡ç­¾å¤åˆ¶
             if (options.VariableMerge != VariableMergeMode.None)
             {
                 try { IMKDuckov.VariableMerge.Merge(source, newItem, options.VariableMerge, acceptKey: options.AcceptVariableKey); } catch { }
@@ -48,7 +47,7 @@ namespace ItemModKit.Adapters.Duckov
                 try { var tags = IMKDuckov.Item.GetTags(source) ?? Array.Empty<string>(); if (tags.Length > 0) IMKDuckov.Write.TryWriteTags(newItem, tags, merge: true); } catch { }
             }
 
-            // ·ÅÖÃ£º½âÎöÄ¿±ê±³°ü²¢³¢ÊÔ·ÅÈë
+            // æ”¾ç½®ï¼šè§£æç›®æ ‡èƒŒåŒ…å¹¶å°è¯•æ”¾å…¥
             object inv = IMKDuckov.InventoryResolver.Resolve(options.Target) ?? IMKDuckov.InventoryResolver.ResolveFallback();
             bool added = false; int index = -1; bool deferred = false;
             if (inv != null)
@@ -74,62 +73,8 @@ namespace ItemModKit.Adapters.Duckov
                 try { diag["newName"] = IMKDuckov.Item.GetDisplayNameRaw(newItem) ?? IMKDuckov.Item.GetName(newItem); } catch { }
             }
             var res = new ClonePipelineResult { NewItem = newItem, Added = added, Index = index, StrategyUsed = used, Diagnostics = diag };
+            try { var oldH = ItemModKit.Adapters.Duckov.Locator.DuckovHandleFactory.CreateItemHandle(source); var newH = ItemModKit.Adapters.Duckov.Locator.DuckovHandleFactory.CreateItemHandle(newItem); IMKDuckov.LogicalIds.Bind(oldH, newH); IMKDuckov.RegisterHandle(newH); } catch { }
             return RichResult<ClonePipelineResult>.Success(res);
-        }
-
-        // ¾ÉµÄÄ¿±ê½âÎöÓë UI Ë¢ĞÂ±£Áô£¬µ«µ±Ç°¹ÜÏßÒÑ¸ÄÎªÓÉ InventoryResolver/UIRefresh Í³Ò»Ìá¹©
-        private static object ResolveTargetInventory(string target)
-        {
-            if (string.IsNullOrEmpty(target) || string.Equals(target, "character", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var tLM = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.LevelManager") ?? DuckovTypeUtils.FindType("LevelManager");
-                    var pInst = tLM?.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    var lm = pInst?.GetValue(null, null);
-                    var pMain = lm?.GetType().GetProperty("MainCharacter", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var main = pMain?.GetValue(lm, null);
-                    var pCharItem = main?.GetType().GetProperty("CharacterItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var chItem = pCharItem?.GetValue(main, null);
-                    var pInv = chItem?.GetType().GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var inv2 = pInv?.GetValue(chItem, null);
-                    if (inv2 != null) return inv2;
-                }
-                catch { }
-            }
-            if (string.Equals(target, "storage", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var tPS = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.PlayerStorage") ?? DuckovTypeUtils.FindType("PlayerStorage");
-                    var pInv = tPS?.GetProperty("Inventory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    var inv = pInv?.GetValue(null, null);
-                    if (inv != null) return inv;
-                }
-                catch { }
-            }
-            return null;
-        }
-
-        private static void TryScheduleNextFrame(Action a)
-        {
-            try
-            {
-                var go = new UnityEngine.GameObject("IMK_ClonePipelineDeferred");
-                go.hideFlags = UnityEngine.HideFlags.HideAndDontSave;
-                go.AddComponent<DeferredInvoker>().Init(a);
-            }
-            catch { a?.Invoke(); }
-        }
-        private static void TryRefreshInventory(object inv)
-        {
-            try { var p = inv.GetType().GetProperty(EngineKeys.Property.NeedInspection, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); p?.SetValue(inv, true, null); } catch { }
-            try { var m = inv.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); m?.Invoke(inv, null); } catch { }
-        }
-        private sealed class DeferredInvoker : UnityEngine.MonoBehaviour
-        {
-            private Action _a; public void Init(Action a) { _a = a; }
-            private System.Collections.IEnumerator Start() { yield return null; try { _a?.Invoke(); } catch { } try { UnityEngine.Object.DestroyImmediate(gameObject); } catch { } }
         }
     }
 }

@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +10,7 @@ using static ItemModKit.Adapters.Duckov.DuckovTypeUtils;
 namespace ItemModKit.Adapters.Duckov
 {
     /// <summary>
-    /// Duckov ÎïÆ··ÃÎÊÊÊÅäÆ÷£ºÌá¹©¶ÔºËĞÄ×Ö¶Î¡¢±äÁ¿¡¢³£Á¿¡¢ĞŞÊÎ¡¢²å²ÛÓë±êÇ©µÄ¶ÁĞ´·â×°¡£
+    /// Duckov ç‰©å“è®¿é—®é€‚é…å™¨ï¼šæä¾›å¯¹æ ¸å¿ƒå­—æ®µã€å˜é‡ã€å¸¸é‡ã€ä¿®é¥°ã€æ’æ§½ä¸æ ‡ç­¾çš„è¯»å†™å°è£…ã€‚
     /// </summary>
     internal sealed class DuckovItemAdapter : IItemAdapter
     {
@@ -250,11 +250,41 @@ namespace ItemModKit.Adapters.Duckov
                     foreach (var s in slots)
                     {
                         if (s == null) continue;
-                        string key = GetMaybe(s, new[] { "Key", "Name", "Id" }) as string;
+                        string key = GetMaybe(s, new[] { "Key" }) as string;
                         var content = GetMaybe(s, new[] { "Content" });
-                        bool occ = content != null;
+                        bool occupied = content != null;
+                        int? contentTypeId = null; string contentName = null;
+                        if (occupied && content != null)
+                        {
+                            try { var idObj = GetMaybe(content, new[] { "TypeID", "TypeId" }); if (idObj != null) contentTypeId = Convert.ToInt32(idObj); } catch { }
+                            try { contentName = GetMaybe(content, new[] { "DisplayName", "Name" }) as string; } catch { }
+                        }
                         string plugType = GetMaybe(s, new[] { "PlugType", "Type", "ExpectedType" })?.ToString();
-                        list.Add(new SlotEntry { Key = key, Occupied = occ, PlugType = plugType });
+                        object icon = GetMaybe(s, new[] { "SlotIcon", "slotIcon" });
+                        bool forbidSameId = ConvertToBool(GetMaybe(s, new[] { "ForbidItemsWithSameID", "forbidItemsWithSameID" }));
+                        // requireTags / excludeTags are List<Tag>; extract Tag.DisplayName or Tag.Key
+                        string[] req = null; string[] exc = null;
+                        try
+                        {
+                            var reqObj = GetMaybe(s, new[] { "requireTags" }) as IEnumerable; if (reqObj != null) { var tmp = new List<string>(); foreach (var tag in reqObj) if (tag != null) tmp.Add(Convert.ToString(GetMaybe(tag, new[] { "DisplayName", "Key", "Name" })) ?? tag.ToString()); req = tmp.ToArray(); }
+                        }
+                        catch { }
+                        try
+                        {
+                            var excObj = GetMaybe(s, new[] { "excludeTags" }) as IEnumerable; if (excObj != null) { var tmp = new List<string>(); foreach (var tag in excObj) if (tag != null) tmp.Add(Convert.ToString(GetMaybe(tag, new[] { "DisplayName", "Key", "Name" })) ?? tag.ToString()); exc = tmp.ToArray(); }
+                        }
+                        catch { }
+                        list.Add(new SlotEntry {
+                            Key = key,
+                            Occupied = occupied,
+                            PlugType = plugType,
+                            SlotIcon = icon,
+                            RequireTagKeys = req,
+                            ExcludeTagKeys = exc,
+                            ForbidSameID = forbidSameId,
+                            ContentTypeId = contentTypeId,
+                            ContentName = contentName
+                        });
                     }
                 }
                 return list.ToArray();
