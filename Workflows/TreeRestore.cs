@@ -5,6 +5,7 @@ namespace ItemModKit.Core
     /// <summary>
     /// Tree export 恢复结果：承载恢复出的根物品、附加结果与导入模式。
     /// 该结果主要服务于 IMKDuckov.RestoreFromTreeExportDetailed(...) 这类门面入口。
+    /// 它是共享 restore 编排结果的 facade 包装，而不是独立的树恢复管线定义。
     /// </summary>
     public sealed class TreeRestoreResult
     {

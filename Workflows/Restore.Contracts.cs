@@ -41,7 +41,12 @@ namespace ItemModKit.Core
         AttachToExplicitSlot = 4,
     }
 
-    /// <summary>restore 管线阶段。</summary>
+    /// <summary>
+    /// restore 共享中段的阶段枚举。
+    /// clone、rebirth、persistence/tree restore 入口可以在前后处理上各自保留意图差异，
+    /// 但中段仍应尽量收敛到同一条 decode -> instantiate -> hydrate -> connect -> attach 管线，
+    /// 不应在各自 facade 内长期分叉出私有树装配顺序。
+    /// </summary>
     public enum RestorePhase
     {
         /// <summary>尚未进入任何阶段。</summary>
@@ -75,6 +80,8 @@ namespace ItemModKit.Core
     /// <summary>
     /// restore 请求对象。
     /// 它同时承载调用方输入、执行偏好和 diagnostics 元数据，是 clone/rebirth/persistence/tree restore 共享的内部契约。
+    /// 入口层只负责把各自语义映射成这份请求，例如 clone 决定复制策略，rebirth 决定替换/回滚语义，
+    /// restore/persistence 决定来源解码与兼容模式；真正的树装配中段不应再被各入口重复实现。
     /// </summary>
     internal sealed class RestoreRequest
     {
@@ -173,7 +180,11 @@ namespace ItemModKit.Core
         public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
     }
 
-    /// <summary>restore 成功路径的内部结果对象。</summary>
+    /// <summary>
+    /// restore 成功路径的内部结果对象。
+    /// 这是共享编排器返回给各 facade 的统一中间结果，随后再由 clone/tree restore/persistence/rebirth
+    /// 映射成各自更友好的外部结果对象，而不是反过来让 facade 各自维护一套私有中段状态。
+    /// </summary>
     internal sealed class RestoreResult
     {
         /// <summary>结束时所在阶段。</summary>
@@ -309,7 +320,11 @@ namespace ItemModKit.Core
         }
     }
 
-    /// <summary>restore orchestrator 的内部接口。</summary>
+    /// <summary>
+    /// restore orchestrator 的内部接口。
+    /// 该接口代表共享树装配中段，而不是某个具体入口的专属实现；
+    /// clone、rebirth、restore 只应在进入前后的意图层分流，避免在这里之下再次分叉出三套 attach/connect 逻辑。
+    /// </summary>
     internal interface ITreeRestoreOrchestrator
     {
         /// <summary>执行一次 restore 请求。</summary>

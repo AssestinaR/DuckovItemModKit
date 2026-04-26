@@ -49,6 +49,8 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// Rebirth 结构化结果：承载新根物品、共享诊断快照以及 failure/recovery/operator alert 元数据。
+    /// rebirth 的特殊性主要在替换、回滚和旧树处置上；新树生成与接回过程仍应尽量走共享 restore 中段，
+    /// 避免 rebirth 长期持有一套与 clone/restore 漂移的私有树装配流程。
     /// </summary>
     public sealed class RebirthRestoreResult
     {

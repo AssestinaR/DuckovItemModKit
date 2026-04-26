@@ -43,6 +43,8 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 事件上下文：用于事件发布与诊断。
+    /// 该模型当前只覆盖 item-centric runtime ingress；更丰富的 combat payload 若未来需要补入，
+    /// 也应作为受边界约束的 bridge 扩展，而不是把 Core 事件面直接推成通用玩法事件系统。
     /// </summary>
     public sealed class ItemEventContext
     {

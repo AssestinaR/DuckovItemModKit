@@ -10,6 +10,8 @@ namespace ItemModKit.Adapters.Duckov
     /// <summary>
     /// 引擎事件桥：订阅场景加载与 Item 的关键生命周期事件，将其转换为 IMK 的统一物品事件。
     /// 用于降低频繁轮询导致的性能开销。
+    /// 这里承担的是 item-centric 的薄事件桥接层，只负责把 Duckov runtime 信号归一到 IMK 事件面，
+    /// 不应继续膨胀成完整 combat framework 或通用玩法事件总线。
     /// </summary>
     internal static class DuckovEventBridge
     {

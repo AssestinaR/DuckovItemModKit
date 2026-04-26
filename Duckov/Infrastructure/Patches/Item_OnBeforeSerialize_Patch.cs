@@ -5,7 +5,7 @@ using HarmonyLib;
 using ItemStatsSystem;
 using ItemModKit.Adapters.Duckov;
 
-namespace ItemModKit.Patches
+namespace ItemModKit.Duckov.Infrastructure.Patches
 {
     [HarmonyPatch]
     internal static class Item_OnBeforeSerialize_Patch

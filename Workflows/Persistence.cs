@@ -28,6 +28,8 @@ namespace ItemModKit.Core
 
     /// <summary>
     /// 持久化恢复结果：承载恢复出的根物品、附加结果与共享诊断快照。
+    /// 它对应的是 persistence 入口语义，内部仍应复用共享 restore 中段，
+    /// 而不是让 persistence 再维护一套独立的节点实例化、树连接和附加实现。
     /// </summary>
     public sealed class PersistenceRestoreResult
     {
