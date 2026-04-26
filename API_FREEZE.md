@@ -1,169 +1,208 @@
-﻿# IMK Stage 1 API Freeze
+# IMK Stage 1 API Freeze
 
-This document enumerates the public contract surface considered STABLE for Stage 1 (do not change signatures / semantics in minor patches).
+This document records the Stage 1 public contract surface that is considered stable.
+For Stage 1, stability is defined by namespace, public type shape, method signatures, and documented semantics.
+Physical file placement is not part of the freeze. The repo may continue to move files between Entry, Contracts, Workflows, Duckov, and Diagnostics as long as the public API below does not break.
 
-Stable Namespaces/Types:
-- ItemModKit.Core (DTOs, interfaces, snapshot utilities)
-- ItemModKit.Adapters.Duckov.IMKDuckov (static facade)
+## Stable Public Namespaces
 
-Stable DTOs (all marked [Serializable]):
-- CoreFields
-- CoreFieldChanges
-- StackInfo, DurabilityInfo, InspectionInfo, OrderingInfo, WeightInfo, RelationInfo, FlagsInfo
-- StatValueEntry, StatsSnapshot
-- InventorySnapshot
-- EffectEntry, EffectInfo, EffectCreateOptions
-- ItemGraphicSnapshot, AgentUtilitiesSnapshot
-- SlotCreateOptions, SlotUpdateOptions
-- ItemSnapshot (Capture() + ToPrettyString())
- - SlotEntry (extended fields: SlotIcon, RequireTagKeys, ExcludeTagKeys, ForbidSameID, ContentTypeId, ContentName, OriginHint)
+- `ItemModKit.Core`
+- `ItemModKit.Core.Locator`
+- `ItemModKit.Adapters.Duckov.IMKDuckov`
 
-Stable Service Interfaces:
-- IReadService
-  - TryReadCoreFields / Variables / Constants / Modifiers / Tags / Slots
-  - TryReadStackInfo / DurabilityInfo / InspectionInfo / OrderingInfo / WeightInfo / Relations / Flags / SoundKey
-  - TryReadStats / TryReadChildInventoryInfo / TryEnumerateChildInventoryItems
-  - TryReadEffects / TryReadItemGraphic / TryReadAgentUtilities
-  - TryReadEffectsDetailed / TryReadModifierDescriptions
-  - Snapshot
-- IWriteService
-  - Core: TryWriteCoreFields
-  - Variables / Constants / Tags: TryWriteVariables / TryWriteConstants / TryWriteTags
-  - Stack & Durability: TrySetStackCount / TrySetMaxStack / TrySetDurability / TrySetMaxDurability / TrySetDurabilityLoss
-  - Inspection: TrySetInspected / TrySetInspecting
-  - Ordering / Sound / Weight / Icon: TrySetOrder / TrySetSoundKey / TrySetWeight / TrySetIcon
-  - Child Inventory: TryAddToChildInventory / TryRemoveFromChildInventory / TryMoveInChildInventory / TryClearChildInventory
-  - Modifiers (raw): TryAddModifier / TryRemoveAllModifiersFromSource / TryReapplyModifiers
-  - Modifier Descriptions: TryAddModifierDescription / TryRemoveModifierDescription / TrySetModifierDescriptionValue / TrySetModifierDescriptionType / TrySetModifierDescriptionOrder / TrySetModifierDescriptionDisplay / TryClearModifierDescriptions / TrySanitizeModifierDescriptions
-  - Effects: TryAddEffect (both overloads) / TryRemoveEffect / TryEnableEffect / TrySetEffectProperty / TryAddEffectComponent / TryRemoveEffectComponent / TrySetEffectComponentProperty
-  - Slots: TryPlugIntoSlot / TryUnplugFromSlot / TryMoveBetweenSlots / TryAddSlot / TryEnsureSlotHost / TryEnsureSlots / TryRemoveSlot / TryRemoveSlotHost / TryRemoveDynamicSlot / TryRemoveBuiltinSlot / TryRemoveSlots / TryRemoveSlotSystem / TrySetSlotTags
-  - Stats: TrySetStatValue / TryEnsureStat / TryRemoveStat
-  - Metadata: TrySetVariableMeta / TrySetConstantMeta
-  - Transactions: BeginTransaction / CommitTransaction / RollbackTransaction
+These namespace names remain the compatibility boundary even after the physical layout migration.
 
-Stable Facade Members (IMKDuckov):
-- Item / Inventory / Slot / Query / Persistence / Rebirth / UISelection / ItemEvents / WorldDrops
-- Read / Write / Factory / Mover / Clone / VariableMerge / UIRefresh
-- InventoryResolver / InventoryPlacement / PersistenceScheduler
-- Version / Capabilities / Require
-- Ownership / LogicalIds / UISelectionV2 / QueryV2
-- MarkDirty / FlushDirty / FlushAllDirty
-- BeginExternalEvents / EndExternalEvents / PublishItemAdded/Removed/Changed/Moved/Merged/Split
+## Stable Contract Rule
 
-Added Helper (Stage 1):
-- SnapshotHelper (CaptureCore / RollbackCore). Considered stable for Stage 1.
+All public DTOs, enums, snapshots, result carriers, handles, and interfaces that are directly referenced by the stable surfaces below are part of the Stage 1 freeze unless this document explicitly marks them as draft or non-frozen.
 
-Semantics Freeze:
-- RichResult.Ok true means operation succeeded and performed requested mutation (or data returned). No silent partial success.
-- TryWriteCoreFields must perform full rollback to original values if any field write fails.
-- Transactions: BeginTransaction returns token; CommitTransaction returns RichResult (Ok on success), RollbackTransaction reverts all writes since BeginTransaction for the given item+token.
-- MarkDirty may be a deferred persistence request; FlushDirty(item, force=false) triggers immediate persistence attempt; FlushAllDirty(reason) flushes all queued.
+This includes, but is not limited to:
 
-Backward Compatibility Rules:
-1. Do not remove, rename, or change parameter order of any method/type listed.
-2. Adding new optional members (nullable payload fields) is allowed if defaults preserve behavior.
-3. New interfaces or extension helpers must not depend on experimental namespaces unless described.
-4. RichResult failure codes must remain within existing ErrorCode enum values (no repurposing meanings).
+- Core read/write DTOs such as `CoreFields`, `CoreFieldChanges`, `StackInfo`, `DurabilityInfo`, `InspectionInfo`, `OrderingInfo`, `WeightInfo`, `RelationInfo`, `FlagsInfo`
+- Stats and catalog DTOs such as `StatValueEntry`, `StatsSnapshot`, `StatCatalogEntry`
+- Inventory / effect / modifier / localization DTOs such as `InventorySnapshot`, `EffectEntry`, `EffectInfo`, `EffectDetails`, `ModifierDescriptionInfo`, `LocalizedTextEntry`, `LocalizedTextSnapshot`, `ItemGraphicSnapshot`, `AgentUtilitiesSnapshot`
+- Slot and snapshot DTOs such as `SlotEntry`, `SlotCreateOptions`, `SlotUpdateOptions`, `ItemSnapshot`
+- Restore / rebirth / clone result carriers such as `PersistenceRestoreResult`, `TreeRestoreResult`, `RebirthRestoreResult`, `ClonePipelineResult`
+- Locator contracts and related enums such as `IItemHandle`, `IInventoryHandle`, `ISlotHandle`, `IOwnershipService`, `IItemQuery`, `IUISelectionV2`, `ILogicalIdMap`, `InventoryKind`
 
-Change Process:
-- Stage 1 modifications can only add new surface (additive) and must update this doc under a new section "Stage 1 Additions".
-- Breaking proposals require drafting Stage 2 plan and migration notes before implementation.
+## Stable Service Interfaces
 
-Diagnostics (non-frozen): PerfCounters, PerfFlushMetrics may change internally without affecting contract.
+### `IReadService`
+
+The following read surface is frozen for Stage 1:
+
+- Core snapshots: `TryReadCoreFields`, `TryReadVariables`, `TryReadConstants`, `TryReadModifiers`, `TryReadTags`, `TryReadSlots`
+- Basic item state: `TryReadStackInfo`, `TryReadDurabilityInfo`, `TryReadInspectionInfo`, `TryReadOrderingInfo`, `TryReadWeightInfo`, `TryReadRelations`, `TryReadFlags`, `TryReadSoundKey`
+- Stats: `TryReadStats`, `TryReadBaseStats`, `TryReadCurrentStats`, `TryEnumerateAvailableStats`
+- Child inventory: `TryReadChildInventoryInfo`, `TryEnumerateChildInventoryItems`
+- Effects and presentation: `TryReadEffects`, `TryReadEffectsDetailed`, `TryReadEffectsDeep`, `TryReadModifierDescriptions`, `TryReadItemGraphic`, `TryReadAgentUtilities`
+- Localization: `TryReadLocalizedText`, `TryReadAllLocalizedTexts`, `TryReadStatLocalizedText`, `TryReadAllStatLocalizedTexts`
+- Full snapshot: `Snapshot`
+
+### `IWriteService`
+
+The following write surface is frozen for Stage 1:
+
+- Core and collections: `TryWriteCoreFields`, `TryWriteVariables`, `TryWriteConstants`, `TryWriteTags`
+- Stack / durability / inspection / ordering / sound / weight / icon: `TrySetStackCount`, `TrySetMaxStack`, `TrySetDurability`, `TrySetMaxDurability`, `TrySetDurabilityLoss`, `TrySetInspected`, `TrySetInspecting`, `TrySetOrder`, `TrySetSoundKey`, `TrySetWeight`, `TrySetIcon`
+- Child inventory: `TryAddToChildInventory`, `TryRemoveFromChildInventory`, `TryMoveInChildInventory`, `TryClearChildInventory`
+- Modifiers and modifier host: `TryAddModifier`, `TryRemoveAllModifiersFromSource`, `TryEnsureModifierHost`, `TryRemoveModifierHost`, `TrySetModifierHostEnabled`, `TryReapplyModifiers`
+- Modifier descriptions: `TryAddModifierDescription`, `TryRemoveModifierDescription`, `TrySetModifierDescriptionValue`, `TrySetModifierDescriptionType`, `TrySetModifierDescriptionOrder`, `TrySetModifierDescriptionDisplay`, `TrySetModifierDescriptionTarget`, `TrySetModifierDescriptionEnableInInventory`, `TryClearModifierDescriptions`, `TrySanitizeModifierDescriptions`
+- Effects: `TryAddEffect` (all overloads), `TryRemoveEffect`, `TryEnableEffect`, `TrySetEffectProperty`, `TryAddEffectComponent`, `TryRemoveEffectComponent`, `TrySetEffectComponentProperty`
+- Effect helpers: `TryRenameEffect`, `TrySetEffectDisplay`, `TrySetEffectDescription`, `TryMoveEffect`, `TryMoveEffectComponent`, `TrySanitizeEffects`
+- Slots: `TryPlugIntoSlot`, `TryUnplugFromSlot`, `TryMoveBetweenSlots`, `TryAddSlot`, `TryEnsureSlotHost`, `TryEnsureSlots`, `TryRemoveSlot`, `TryRemoveSlotHost`, `TryRemoveDynamicSlot`, `TryRemoveBuiltinSlot`, `TryRemoveSlots`, `TryRemoveSlotSystem`, `TrySetSlotTags`
+- Stats: `TrySetStatValue`, `TryEnsureStat`, `TryRemoveStat`, `TryMoveStat`, `TryEnsureStatsHost`, `TryRemoveStatsHost`
+- Metadata: `TrySetVariableMeta`, `TrySetConstantMeta`
+- Transactions: `BeginTransaction`, `CommitTransaction`, `RollbackTransaction`
+
+## Stable Locator Surface
+
+The handle / locator model is now part of the Stage 1 stable contract.
+
+Frozen public contracts:
+
+- `IItemHandle`
+- `IItemLocator`
+- `IItemIndex`
+- `IInventoryClassifier`
+- `IItemScope`
+- `IInventoryHandle`
+- `ISlotHandle`
+- `IOwnershipService`
+- `IItemQuery`
+- `IUISelectionV2`
+- `ILogicalIdMap`
+
+## Stable Facade Members
+
+The following `IMKDuckov` members are stable Stage 1 entry points.
+
+### Stable service properties
+
+- `Item`, `Inventory`, `Slot`
+- `Query`, `Persistence`, `Rebirth`, `UISelection`
+- `ItemEvents`, `WorldDrops`
+- `Read`, `Write`, `Factory`, `Mover`, `Clone`, `VariableMerge`, `UIRefresh`
+- `InventoryResolver`, `InventoryPlacement`, `PersistenceScheduler`
+- `Ownership`, `LogicalIds`, `UISelectionV2`, `QueryV2`
+
+### Stable version / runtime helpers
+
+- `Version`, `Capabilities`, `Require`
+- `GetOwnerId`, `IsOwnedBy`, `UseLogger`
+- `TryLock`, `Unlock`
+- `EnsureMigrated`
+
+### Stable restore / rebirth helpers
+
+- `RestoreFromMeta(...)`
+- `RestoreFromMetaDetailed(...)`
+- `RestoreFromTreeExport(...)`
+- `RestoreFromTreeExportDetailed(...)`
+- `ReplaceRebirthDetailed(...)`
+- `ReplaceSafeRebirthDetailed(...)`
+- `ReplaceCleanRebirthDetailed(...)`
+- `ReplaceRebirthReport(...)`
+- `ReplaceSafeRebirthReport(...)`
+- `ReplaceCleanRebirthReport(...)`
+- `GetRecentRebirthReports(...)`
+- `ClearRecentRebirthReports()`
+- `LogRecentRebirthReports(...)`
+
+### Stable event / persistence orchestration helpers
+
+- `BeginExternalEvents()`, `EndExternalEvents()`
+- `PublishItemAdded(...)`, `PublishItemRemoved(...)`, `PublishItemChanged(...)`, `PublishItemMoved(...)`, `PublishItemMerged(...)`, `PublishItemSplit(...)`
+- `MarkDirty(...)`, `FlushDirty(...)`, `FlushAllDirty(...)`
+
+### Stable locator / query helpers on the facade
+
+- `QueryDiagnostics()`
+- `ReindexAll(Func<IEnumerable<object>> enumerator)`
+- `ReindexAll()`
+- `TryGetCurrentSelectedHandle()`
+- `RefreshHandleMetadata(...)`
+- `TryGetHandle(...)`
+- `TryGetHandleByInstanceId(...)`
+- `QueryPerfStats()`
+- `ForceWorldDropRescan()`
+
+## Compatibility Guidance For Legacy Facades
+
+- `IMKDuckov.Query` remains frozen as a Stage 1 compatibility facade.
+- `IMKDuckov.UISelection` remains frozen as a Stage 1 compatibility facade.
+- New integrations should prefer `IMKDuckov.QueryV2`, `IMKDuckov.UISelectionV2`, and `IMKDuckov.TryGetCurrentSelectedHandle()`.
+- Obsolete warnings on legacy members are guidance only; they do not revoke Stage 1 compatibility.
+
+## Stable Semantics
+
+- `RichResult.Ok == true` means the requested operation succeeded according to the documented behavior and did not silently degrade into partial success.
+- `TryWriteCoreFields` must preserve rollback semantics when a multi-field write fails midway.
+- Transaction semantics remain frozen: `BeginTransaction` creates a tokenized write scope, `CommitTransaction` finalizes it, and `RollbackTransaction` reverts writes performed inside that scope for the target item.
+- `MarkDirty` represents a persistence request, not necessarily an immediate flush.
+- `FlushDirty(item, force)` and `FlushAllDirty(reason)` remain the stable explicit flush controls.
+- Restore and rebirth detailed/report helpers must continue to expose structured diagnostics through their result carriers rather than forcing callers to scrape logs.
+- `ReplaceRebirthDetailed(...)` remains success-oriented under `RichResult<T>` semantics.
+- `ReplaceRebirthReport(...)` and its explicit-intent variants remain failure-safe report carriers.
+
+## Draft Surface Not Covered By The Freeze
+
+The following surface is intentionally additive and draft-oriented. It may evolve during Stage 1 and should not be treated as a hard compatibility contract yet.
+
+### Draft provisioning / schema helpers
+
+- `EnsureSlotsDraft(...)`
+- `EnsureResourceProvisionDraft(...)`
+- `EnumerateEffectSchemaDraft(...)`
+
+Associated draft DTOs / enums remain draft as well, including:
+
+- `EnsureSlotsRequest`, `EnsureSlotsResult`
+- `ResourceProvisionDefinition`, `EnsureResourceProvisionRequest`, `EnsureResourceProvisionResult`, `EnsureResourceProvisionDiagnostics`
+- `ResourceProvisioningMode`, `ResourceProvisioningPhase`
+- `EffectSchemaCatalogDraft` and related schema draft entries
+
+### Draft buff helpers
+
+- `EnumerateBuffCatalogDraft()`
+- `TryReadBuffsDraft(...)`
+- `TryFindBuffDraft(...)`
+- `TryFindBuffByExclusiveTagDraft(...)`
+- `TryFindBuffByTypeDraft(...)`
+- `TryHasBuffDraft(...)`
+- `TryAddBuffDraft(...)`
+- `TryRemoveBuffDraft(...)`
+- `TrySetBuffLayersDraft(...)`
+- `TryAddBuffLayersDraft(...)`
+- `TryRemoveBuffLayersDraft(...)`
+- `TryRemoveBuffsByExclusiveTagDraft(...)`
+
+Associated draft DTOs remain draft as well:
+
+- `BuffCatalogDraft`
+- `BuffCatalogEntryDraft`
+- `BuffSnapshotDraft`
+
+Draft meaning in Stage 1:
+
+- usable for Probe, internal tooling, and controlled downstream incubation
+- additive growth is allowed
+- signatures and bounded semantics may still be refined before they graduate into the frozen read/write or capability surface
+
+## Backward Compatibility Rules
+
+1. Do not remove, rename, or reorder parameters for any stable member listed in this document.
+2. Do not repurpose an existing DTO field, enum value, capability bit, or error code to mean something else.
+3. Additive expansion is allowed when defaults preserve old behavior and existing callers do not need source changes.
+4. Physical refactors are allowed only when namespace and public behavior remain compatible.
+5. New experimental helpers must stay outside the stable list until they are explicitly promoted here.
+
+## Non-Frozen Internal Diagnostics
+
+The following remain intentionally non-frozen internal tooling and may change without API notice:
+
+- internal perf counters and perf snapshots
+- internal flush metrics plumbing
+- internal migration / patching / infrastructure helpers that are not exposed as public Stage 1 contracts
 
 End of Stage 1 API Freeze.
-
-## Stage 1 Additions (Slot Refactor)
-Additive, non-breaking enhancements:
-1. SlotEntry struct gained optional metadata fields (default-safe): SlotIcon, RequireTagKeys, ExcludeTagKeys, ForbidSameID, ContentTypeId, ContentName, OriginHint.
-2. Internal slot write logic now uses game signature Plug(Item,out Item) with CanPlug pre-check; error messages standardized using slot.* prefixes.
-3. Experimental helper methods (not frozen): TrySetSlotIcon. This may change or be removed; treat as optional.
-4. SlotCreateOptions.DisplayName currently ignored (game derives DisplayName from first requireTag). Field retained for future compatibility.
-5. RichResult semantics unchanged: Ok only on full success.
-6. Stable slot additions: TryEnsureSlotHost provides a direct stable path to initialize a slot host on items that currently have no Slots component, TryEnsureSlots provides a direct stable combination path for host initialization plus missing-slot provisioning, TryRemoveSlotHost removes an empty slot host and clears the default dynamic-slot persistence key, TryRemoveDynamicSlot removes IMK-persisted dynamic slots from both runtime and draft metadata, TryRemoveBuiltinSlot records builtin-slot tombstones so runtime removal can survive restart, TryRemoveSlots provides a stable batch-removal entry, TryRemoveSlotSystem removes a fully emptied slot system as a single workflow, and TrySetSlotTags is part of the stable slot write surface.
-
-## Stage 1 Additions (Effects Deep/Helpers)
-- New read API: IReadService.TryReadEffectsDeep to enumerate effects and component-level properties (primitive fields/properties only), for diagnostics/UI.
-- New helper writes (non-breaking additions on IWriteService):
-  - TryRenameEffect / TrySetEffectDisplay / TrySetEffectDescription
-  - TryMoveEffect (reorder effects) / TryMoveEffectComponent (reorder triggers/filters/actions)
-  - TrySanitizeEffects (remove nulls, clean invalid references)
-These are additive. Defaults preserve previous behavior. External mods can opt-in; no change required for existing code.
-
-### Migration notes for UI mods
-- Data source should prefer TryReadEffectsDeep, fallback to TryReadEffectsDetailed, then TryReadEffects.
-- Editing UI:
-  - Toggle Enabled => Write.TryEnableEffect
-  - Toggle Display / Edit Description => Write.TrySetEffectDisplay / TrySetEffectDescription
-  - Rename => Write.TryRenameEffect
-  - Reorder (drag & drop): Write.TryMoveEffect (for effects), Write.TryMoveEffectComponent (for components)
-  - Property editing for components => Write.TrySetEffectComponentProperty
-- Consistency:
-  - After writes, re-read with TryReadEffectsDeep or call existing UI refresh.
-  - Use transactions for batch edits to provide atomic UX.
-- Compatibility:
-  - If some fields (Display/Description) are missing on a game build, hide corresponding controls.
-  - Deep read is optional; fallbacks ensure UI remains usable on older environments.
-
-## Stage 1 Additions (Facade Guidance)
-- `IMKDuckov.Query` and `IMKDuckov.UISelection` remain part of the frozen Stage 1 facade.
-- New code should prefer `IMKDuckov.QueryV2`, `IMKDuckov.UISelectionV2`, and `IMKDuckov.TryGetCurrentSelectedHandle()`.
-- The legacy `Query` / `UISelection` members are compatibility facades and may emit non-blocking obsolete warnings to steer new integrations onto the V2 path.
-
-## Stage 1 Additions (Persistence Restore Guidance)
-- New additive facade helpers: `IMKDuckov.RestoreFromMeta(ItemMeta)` and `IMKDuckov.RestoreFromMeta(ItemMeta, string targetKey, bool refreshUI = true)`.
-- New additive detailed helpers: `IMKDuckov.RestoreFromMetaDetailed(ItemMeta)` and `IMKDuckov.RestoreFromMetaDetailed(ItemMeta, string targetKey, bool refreshUI = true)`.
-- New additive DTO: `PersistenceRestoreResult` with `RootItem`, `Attached`, `TargetResolved`, `AttachedIndex`, `StrategyUsed`, `Diagnostics`.
-- These helpers restore from persisted `ItemMeta` through the shared restore orchestrator.
-- `targetKey == null` returns a detached root; specifying `targetKey` requests attach to a resolved inventory host.
-
-## Stage 1 Additions (Tree Export Restore Guidance)
-- New additive facade helpers: `IMKDuckov.RestoreFromTreeExport(JObject)` and `IMKDuckov.RestoreFromTreeExport(JObject, string targetKey, bool refreshUI = true)`.
-- New additive detailed helpers: `IMKDuckov.RestoreFromTreeExportDetailed(JObject)` and `IMKDuckov.RestoreFromTreeExportDetailed(JObject, string targetKey, bool refreshUI = true)`.
-- New additive DTO: `TreeRestoreResult` with `RootItem`, `Attached`, `TargetResolved`, `AttachedIndex`, `StrategyUsed`, `ImportMode`, `Diagnostics`.
-- These helpers restore from `DuckovTreeDataService.TryExport(...)` payloads through the shared restore orchestrator.
-- Current bounded v1 prefers reconstructing exported inventory/slot structure and variable values, then falls back to minimal import when tree reconstruction cannot be completed.
-- Export payload now also carries `rootInstanceId` so tree restore can resolve the root explicitly instead of relying on entry ordering.
-- Tree restore diagnostics now also carry `tree.fallbackUsed`, `tree.fallbackStage`, `tree.fallbackReason`, `tree.entriesRequested`, and `tree.entriesImported` metadata.
-- Tree restore diagnostics also distinguish rebuild vs attach outcomes via `tree.rebuildCompleted`, `tree.rebuildDegraded`, `tree.attachRequested`, and `tree.attachFailedAfterRebuild`.
-- Shared restore diagnostics also carry `attachOutcome`, `requestedTargetResolved`, and `fallbackTargetUsed` so callers can distinguish unresolved targets, fallback-target placement, deferred retry, and direct attach failure.
-
-## Stage 1 Additions (Shared Restore Diagnostics)
-- `ClonePipelineResult` gained additive property `RestoreDiagnostics` so clone success paths can expose the shared restore diagnostics object directly.
-- Existing `Diagnostics` dictionary remains supported; `RestoreDiagnostics` is the canonical structured carrier for shared orchestrator diagnostics when available.
-
-## Stage 1 Additions (Rebirth Detailed Guidance)
-- New additive facade helper: `IMKDuckov.ReplaceRebirthDetailed(object oldItem, ItemMeta meta, bool keepLocation = true)`.
-- New additive facade helper: `IMKDuckov.ReplaceRebirthReport(object oldItem, ItemMeta meta, bool keepLocation = true)`.
-- `ReplaceRebirthDetailed(...)` / `ReplaceRebirthReport(...)` remain stable compatibility entry points and currently resolve to `RebirthIntent.SafeReplace` semantics.
-- New additive facade helpers: `IMKDuckov.ReplaceSafeRebirthDetailed(object oldItem, ItemMeta meta, bool keepLocation = true)`, `IMKDuckov.ReplaceSafeRebirthReport(object oldItem, ItemMeta meta, bool keepLocation = true)`.
-- New additive facade helpers: `IMKDuckov.ReplaceCleanRebirthDetailed(object oldItem, ItemMeta meta, bool keepLocation = true)`, `IMKDuckov.ReplaceCleanRebirthReport(object oldItem, ItemMeta meta, bool keepLocation = true)`.
-- New additive facade helpers: `IMKDuckov.GetRecentRebirthReports(int maxCount = 20)`, `IMKDuckov.ClearRecentRebirthReports()`, and `IMKDuckov.LogRecentRebirthReports(int maxCount = 10, bool includeDiagnostics = false)`.
-- New additive enum: `RebirthIntent` with `SafeReplace` and `CleanRebirth`.
-- New additive DTO: `RebirthRestoreResult` with `ReportedAtUtc`, `Succeeded`, `ErrorCode`, `Error`, `RootItem`, `Attached`, `TargetResolved`, `AttachedIndex`, `StrategyUsed`, `IntentUsed`, `RollbackOutcome`, `FailureKind`, `FailureAction`, `FailurePhase`, `FailureMatrixKey`, `PolicyDecision`, `MatrixPolicyKey`, `RecoveryDisposition`, `ManualRecoveryRequired`, `OperatorAlertLevel`, `OperatorAlertCode`, `OperatorAlertMessage`, and `Diagnostics`.
-- `ReplaceRebirthDetailed(...)` remains success-oriented under existing `RichResult<T>` semantics; `ReplaceRebirthReport(...)` is the failure-safe structured carrier for shared diagnostics, rebirth failure taxonomy, recovery disposition, and operator alert metadata.
-- `ReplaceSafeRebirth*` and `ReplaceCleanRebirth*` are additive explicit-intent helpers; existing call sites do not need migration unless they want to opt into clean rebirth semantics.
-- Recent rebirth reports are now buffered in a lightweight in-memory diagnostics queue so UI/debug tools can pull the latest replacement outcomes without scraping logs.
-- The `RebirthReports` capability bit indicates that recent rebirth report buffering and log export are available through the stable facade.
-
-## Stage 1 Additions (Draft Resource Provisioning Guidance)
-- New additive facade helper: `IMKDuckov.EnsureResourceProvisionDraft(EnsureResourceProvisionRequest request)`.
-- New additive DTOs: `ResourceProvisionDefinition`, `EnsureResourceProvisionRequest`, `EnsureResourceProvisionResult`, and `EnsureResourceProvisionDiagnostics`.
-- New additive enums: `ResourceProvisioningMode` with `Durability` and `UseCount`, and `ResourceProvisioningPhase` for draft pipeline diagnostics.
-- Current bounded v1 semantics:
-  - `Durability` writes `MaxDurability`, `Durability`, and `DurabilityLoss`.
-  - `UseCount` currently reuses `MaxStackCount` and `Count` as the minimal resource-like runtime representation.
-  - When `PersistDefinitionToVariables=true`, the draft payload is written to `IMK_Meta.ResourceProvisionDraft` by default and is replayed on load through the persistence adapter.
-- This surface is additive but still draft-oriented: suitable for Probe, internal tools, and controlled mod incubation. It should not be treated as a fully frozen gameplay contract yet.
-
-## Stage 1 Additions (Draft Buff Guidance)
-- New additive facade helpers: `IMKDuckov.EnumerateBuffCatalogDraft()`, `IMKDuckov.TryReadBuffsDraft(object hostContext = null)`, `IMKDuckov.TryFindBuffDraft(int buffId, object hostContext = null)`, `IMKDuckov.TryAddBuffDraft(int buffId, object hostContext = null, int overrideWeaponId = 0)`, `IMKDuckov.TryRemoveBuffDraft(int buffId, bool removeOneLayer = false, object hostContext = null)`, and `IMKDuckov.TrySetBuffLayersDraft(int buffId, int layers, object hostContext = null)`.
-- Additional additive draft helpers: `IMKDuckov.TryFindBuffByExclusiveTagDraft(string exclusiveTag, object hostContext = null)`, `IMKDuckov.TryFindBuffByTypeDraft(string typeFullName, object hostContext = null)`, `IMKDuckov.TryHasBuffDraft(int buffId, object hostContext = null)`, `IMKDuckov.TryAddBuffLayersDraft(int buffId, int layerDelta, bool addIfMissing = true, object hostContext = null, int overrideWeaponId = 0)`, `IMKDuckov.TryRemoveBuffLayersDraft(int buffId, int layerDelta, object hostContext = null)`, and `IMKDuckov.TryRemoveBuffsByExclusiveTagDraft(string exclusiveTag, bool removeOneLayer = false, object hostContext = null)`.
-- New additive DTOs: `BuffCatalogDraft`, `BuffCatalogEntryDraft`, and `BuffSnapshotDraft`.
-- Current bounded v1 semantics:
-  - `hostContext == null` targets the main character.
-  - Passing the main character, the main character item, or an item under the main character item tree resolves to the same buff manager.
-  - Catalog enumeration reads runtime buff prefabs from `GameplayDataSettings.Buffs`.
-  - Direct mutation is runtime-only and currently covers add, remove, and layer writes for active buffs.
-- Draft query/mutation helpers now also cover active-buff lookup by `ExclusiveTag` or runtime type name, boolean existence checks, additive/subtractive layer helpers, and exclusive-tag batch removal.
-- This surface is additive but still draft-oriented: suitable for Probe, internal tools, and controlled mod incubation. It is intentionally not part of the frozen `IReadService` / `IWriteService` or the stable capability bitset yet.
