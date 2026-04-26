@@ -1,2 +1,0 @@
-# 第一批安全迁移清单：当前仓内无调用、且不挂公开门面的低风险 legacy 文件
-Adapters/Duckov/Atomic.cs

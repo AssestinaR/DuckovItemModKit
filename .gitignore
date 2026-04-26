@@ -87,6 +87,7 @@ coverage/
 # Local archive / scratch
 bak/
 legacy/
+scripts/
 新建 文本文档.txt
 
 # IMK project specific: skip reference docs in this project folder
