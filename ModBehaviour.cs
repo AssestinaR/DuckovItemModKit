@@ -8,14 +8,14 @@ namespace ItemModKit
     /// IMK 入口脚本。加载后负责：初始化事件桥、生命周期落盘。
     /// 核心不再尝试启动任何 Samples 侧的 UI/工具。
     /// </summary>
-    public class ModBehaviour : Duckov.Modding.ModBehaviour
+    public class ModBehaviour : global::Duckov.Modding.ModBehaviour
     {
         private static bool s_patchesInstalled;
 
         private static void ReportLifecycleFailureOnce(string operation, Exception ex)
         {
             if (string.IsNullOrEmpty(operation) || ex == null) return;
-            Adapters.Duckov.IMKDuckov.Log.Warn($"[IMK.ModBehaviour] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
+            Core.Log.Warn($"[IMK.ModBehaviour] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
         }
 
         /// <summary>

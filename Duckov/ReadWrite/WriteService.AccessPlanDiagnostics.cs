@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ItemModKit.Core;
 
 namespace ItemModKit.Adapters.Duckov
 {

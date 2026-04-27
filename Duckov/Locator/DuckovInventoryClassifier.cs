@@ -31,6 +31,14 @@ namespace ItemModKit.Adapters.Duckov.Locator
             }
         }
 
+        /// <summary>
+        /// 按运行时 Inventory 对象判断其所属分类。
+        /// </summary>
+        /// <param name="inv">待判断的 Inventory 运行时对象。</param>
+        /// <returns>
+        /// 命中玩家、仓库或战利品箱时返回对应分类；
+        /// 无法识别但对象非空时返回 <see cref="InventoryKind.Other"/>；传入 null 时返回 <see cref="InventoryKind.Unknown"/>。
+        /// </returns>
         public InventoryKind ClassifyInventory(object inv)
         {
             if (inv == null) return InventoryKind.Unknown;
@@ -40,6 +48,11 @@ namespace ItemModKit.Adapters.Duckov.Locator
             return InventoryKind.Other;
         }
 
+        /// <summary>
+        /// 判断给定 Inventory 是否属于战利品箱。
+        /// </summary>
+        /// <param name="inv">待判断的 Inventory 运行时对象。</param>
+        /// <returns>命中战利品箱字典或其典型运行时特征时返回 true；否则返回 false。</returns>
         public bool IsLootBox(object inv)
         {
             try
@@ -62,6 +75,11 @@ namespace ItemModKit.Adapters.Duckov.Locator
             return false;
         }
 
+        /// <summary>
+        /// 判断给定 Inventory 是否属于玩家当前主背包。
+        /// </summary>
+        /// <param name="inv">待判断的 Inventory 运行时对象。</param>
+        /// <returns>命中角色主背包时返回 true；否则返回 false。</returns>
         public bool IsPlayerInventory(object inv)
         {
             try
@@ -90,6 +108,11 @@ namespace ItemModKit.Adapters.Duckov.Locator
             return false;
         }
 
+        /// <summary>
+        /// 判断给定 Inventory 是否属于玩家仓库 / storage。
+        /// </summary>
+        /// <param name="inv">待判断的 Inventory 运行时对象。</param>
+        /// <returns>命中静态 PlayerStorage.Inventory 时返回 true；否则返回 false。</returns>
         public bool IsStorage(object inv)
         {
             try
@@ -106,6 +129,7 @@ namespace ItemModKit.Adapters.Duckov.Locator
         /// <summary>
         /// 枚举所有已知战利品箱 Inventory（辅助下游快速批量处理）。
         /// </summary>
+        /// <returns>返回当前 LevelManager 能解析到的所有非 null 战利品箱 Inventory 集合；失败时返回空集合。</returns>
         public IEnumerable<object> EnumerateLootBoxes()
         {
             var list = new List<object>();

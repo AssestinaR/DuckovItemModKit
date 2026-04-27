@@ -20,7 +20,14 @@ namespace ItemModKit.Adapters.Duckov
         /// 该流程会校验宿主、确保槽位宿主存在、合并槽位定义、写入草案持久化并刷新运行时状态。
         /// </summary>
         /// <param name="request">补槽请求对象。</param>
-        /// <returns>成功时返回包含诊断信息的补槽结果；失败时返回对应错误码与错误信息。</returns>
+        /// <returns>
+        /// 成功时返回包含诊断信息的补槽结果；
+        /// 失败时返回对应错误码与错误信息，且 `RichResult.Value` 为默认值。
+        /// </returns>
+        /// <remarks>
+        /// 这是补槽草案的主入口。
+        /// 对后置作者来说，最稳妥的判断方式是：先看 `Ok`，再看 `Value.CreatedSlotKeys / ReusedSlotKeys / Diagnostics`。
+        /// </remarks>
         public static RichResult<EnsureSlotsResult> EnsureSlots(EnsureSlotsRequest request)
         {
             if (request == null)
@@ -183,7 +190,10 @@ namespace ItemModKit.Adapters.Duckov
         /// </summary>
         /// <param name="ownerItem">目标物品。</param>
         /// <param name="variableKey">持久化变量键；为 null 时使用默认键。</param>
-        /// <returns>存在可读定义时返回 true；否则返回 false。</returns>
+        /// <returns>
+        /// 存在可读定义时返回 true；
+        /// 若变量不存在、内容为空或读取过程失败，则返回 false。
+        /// </returns>
         public static bool HasPersistedDefinitions(object ownerItem, string variableKey = null)
         {
             if (ownerItem == null)
@@ -209,7 +219,14 @@ namespace ItemModKit.Adapters.Duckov
         /// </summary>
         /// <param name="ownerItem">目标物品。</param>
         /// <param name="variableKey">持久化变量键；为 null 时使用默认键。</param>
-        /// <returns>成功应用任意槽位定义或移除标记时返回 true；否则返回 false。</returns>
+        /// <returns>
+        /// 成功应用任意槽位定义或移除标记时返回 true；
+        /// 若没有可回放数据、回放失败或所有条目都未产生实际变更，则返回 false。
+        /// </returns>
+        /// <remarks>
+        /// 该方法更适合持久化恢复或生命周期桥调用。
+        /// 如果后置作者想主动补槽并获得更细的成功/失败信息，应优先调用 `EnsureSlots` 或 facade 上的 `EnsureSlotsDraft`。
+        /// </remarks>
         public static bool TryApplyPersistedDefinitions(object ownerItem, string variableKey = null)
         {
             if (ownerItem == null)
@@ -291,7 +308,13 @@ namespace ItemModKit.Adapters.Duckov
         /// </summary>
         /// <param name="ownerItem">目标物品。</param>
         /// <param name="variableKey">持久化变量键；为 null 时使用默认键。</param>
-        /// <returns>同步并写回成功时返回 true；否则返回 false。</returns>
+        /// <returns>
+        /// 同步并写回成功时返回 true；
+        /// 若目标没有草案、运行时槽位无法读取或写回失败，则返回 false。
+        /// </returns>
+        /// <remarks>
+        /// 该入口适合在运行时已经发生槽位变化后，把最新的动态槽定义重新压回草案 JSON，保证后续存档恢复仍能重建相同结构。
+        /// </remarks>
         public static bool TrySyncPersistedDefinitionsFromRuntime(object ownerItem, string variableKey = null)
         {
             if (ownerItem == null)

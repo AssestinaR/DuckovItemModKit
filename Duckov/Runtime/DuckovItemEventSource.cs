@@ -47,6 +47,7 @@ namespace ItemModKit.Adapters.Duckov
         /// <summary>
         /// 构造函数：创建一个物品事件源并关联查询与物品访问接口。
         /// </summary>
+        /// <param name="query">旧查询接口参数；当前仅为兼容保留，已被忽略。</param>
         /// <param name="item">物品适配器（用于读取核心字段与变量）。</param>
         [Obsolete("旧查询参数已被忽略。请改用 DuckovItemEventSource(IItemAdapter)。", false)]
         public DuckovItemEventSource(IItemQuery query, IItemAdapter item) : this(item) { }

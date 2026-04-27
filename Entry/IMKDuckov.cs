@@ -169,6 +169,16 @@ namespace ItemModKit.Adapters.Duckov
         /// 执行“无槽位物品补槽”草案请求。
         /// 当前仍属于实现孵化期入口，适合 Probe、内部工具和受控后置 mod 使用。
         /// </summary>
+        /// <param name="request">补槽请求对象，负责描述目标物品、目标槽位以及是否需要刷新 UI / 写回持久化。</param>
+        /// <returns>
+        /// 成功时返回包含补槽结果和 diagnostics 的 `RichResult`；
+        /// 失败时返回错误码与错误信息，调用方应根据 `Ok` 判断是否真的补槽成功。
+        /// </returns>
+        /// <remarks>
+        /// 这是面向后置作者的 facade 入口。
+        /// 若只想判断“有没有成功补槽”，先看 `Ok`；
+        /// 若还要知道哪些槽是新建、哪些只是复用，再看 `Value.CreatedSlotKeys` 和 `Value.ReusedSlotKeys`。
+        /// </remarks>
         public static RichResult<EnsureSlotsResult> EnsureSlotsDraft(EnsureSlotsRequest request)
         {
             return DuckovSlotProvisioningDraft.EnsureSlots(request);
@@ -178,6 +188,15 @@ namespace ItemModKit.Adapters.Duckov
         /// 执行 durability/use-count 补建草案请求。
         /// 当前仍属于实现孵化期入口，适合 Probe、内部工具和受控后置 mod 使用。
         /// </summary>
+        /// <param name="request">资源补建请求对象，负责描述目标物品、目标资源状态以及后续是否刷新 UI / 写回持久化。</param>
+        /// <returns>
+        /// 成功时返回包含补建结果和 diagnostics 的 RichResult；
+        /// 失败时返回错误码与错误信息，调用方应优先检查 Ok。
+        /// </returns>
+        /// <remarks>
+        /// 对后置作者来说，最常见的读取方式是：
+        /// 先看 Ok，再看 Value.RuntimeStateApplied、Value.MetadataPersisted 和 Value.Diagnostics。
+        /// </remarks>
         public static RichResult<EnsureResourceProvisionResult> EnsureResourceProvisionDraft(EnsureResourceProvisionRequest request)
         {
             return DuckovResourceProvisioningDraft.EnsureProvision(request);
