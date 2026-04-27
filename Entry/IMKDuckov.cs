@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using ItemModKit.Core;
 using ItemModKit.Diagnostics;
 using ItemModKit.Core.Locator;
@@ -87,7 +88,7 @@ namespace ItemModKit.Adapters.Duckov
                 // 初始化事件桥：订阅全部现有 Item 实例变化
                 DuckovEventBridge.Initialize();
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("StaticInitialization", ex); }
         }
 
         // ---- Core Adapters / Services ----
@@ -953,6 +954,15 @@ namespace ItemModKit.Adapters.Duckov
 
         // ---- Dirty Markers ----
         private static int s_writeScope;
+        private static readonly ConcurrentDictionary<string, byte> s_reportedFacadeFailures = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+
+        private static void ReportFacadeFailureOnce(string operation, Exception ex)
+        {
+            if (string.IsNullOrEmpty(operation) || ex == null) return;
+            if (!s_reportedFacadeFailures.TryAdd(operation, 0)) return;
+            Log.Warn($"[IMK.Facade] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
+        }
+
         /// <summary>
         /// 授权 WriteService 内部标记脏（使用 using 范围控制）。
         /// 显式模式(ExplicitOnly)下，仅在该范围内的 MarkDirty 才生效。
@@ -974,18 +984,30 @@ namespace ItemModKit.Adapters.Duckov
             }
             PersistenceScheduler.EnqueueDirty(item, kind, immediate);
         }
-        /// <summary>刷新指定物品的脏写入（可选强制）。</summary>
+        /// <summary>
+        /// 刷新指定物品的脏写入（可选强制）。
+        /// </summary>
+        /// <remarks>
+        /// 这是显式刷写入口。
+        /// 若底层调度器自身抛错，异常会继续按调用链向上传递；该 facade 不做吞异常兼容。
+        /// </remarks>
         public static void FlushDirty(object item, bool force = false) => PersistenceScheduler.Flush(item, force);
         /// <summary>
         /// 刷新所有脏队列；reason="manual-deferred" 时为延迟/分片刷新。
         /// </summary>
+        /// <remarks>
+        /// 这是兼容型 facade helper。
+        /// 若内部刷新失败，当前方法保持 void 签名不变，不会向调用方抛出兼容层异常；
+        /// 失败信息会通过一次性 facade diagnostics 日志输出，便于后置 mod 作者判断是 deferred 调度失败还是整体 flush 失败。
+        /// </remarks>
         public static void FlushAllDirty(string reason = "manual")
         {
             try
             {
                 if (reason == "manual-deferred")
                 {
-                    try { PersistenceScheduler.GetType().GetMethod("RequestFlushAllDeferred", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)?.Invoke(PersistenceScheduler, null); } catch { }
+                    try { PersistenceScheduler.GetType().GetMethod("RequestFlushAllDeferred", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)?.Invoke(PersistenceScheduler, null); }
+                    catch (Exception ex) { ReportFacadeFailureOnce("FlushAllDirty.deferred", ex); }
                     Core.Log.Info("[IMK.Flush] scheduled deferred flush (will spread across ticks)");
                     return;
                 }
@@ -1048,9 +1070,18 @@ namespace ItemModKit.Adapters.Duckov
                     (QueryV2 as ItemModKit.Adapters.Duckov.Locator.DuckovItemQueryV2)?.UpdateHandle(handle);
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("IncrementalRefresh", ex); }
         }
-        /// <summary>获取最近一次 QueryV2 查询的耗时和谓词统计。</summary>
+        /// <summary>
+        /// 获取最近一次 QueryV2 查询的耗时和谓词统计。
+        /// </summary>
+        /// <returns>
+        /// 成功时返回最近一次查询的 `(ticks, results, source, predicates)`；
+        /// 若 QueryV2 不可用或读取统计失败，则返回 `(0, 0, 0, 0)`。
+        /// </returns>
+        /// <remarks>
+        /// 失败时会记录一次性 facade diagnostics 日志，而不是静默吞掉。
+        /// </remarks>
         public static (long ticks, int results, int source, int predicates) QueryDiagnostics()
         {
             try
@@ -1059,8 +1090,69 @@ namespace ItemModKit.Adapters.Duckov
                 if (q == null) return (0,0,0,0);
                 return (q.LastQueryTicks, q.LastResultCount, q.LastSourceSize, q.LastPredicateCount);
             }
-            catch { return (0,0,0,0); }
+            catch (Exception ex) { ReportFacadeFailureOnce("QueryDiagnostics", ex); return (0,0,0,0); }
         }
+
+        /// <summary>
+        /// 汇总当前运行时已知 access plan 的环境诊断信息。
+        /// </summary>
+        /// <returns>
+        /// 成功时返回包含 `stats`、`modifiers`、`slots` 三类能力摘要的 diagnostics 字典。
+        /// 若当前没有可采样物品，也会返回摘要对象，但各能力通常会标记为 `unknown`。
+        /// 发生 facade 级失败时返回空字典。
+        /// </returns>
+        /// <remarks>
+        /// 这是阶段 4 的环境自检入口。
+        /// 返回结果会优先基于当前已知物品样本初始化 access plan，然后给出 `complete`、`degraded` 或 `unknown` 摘要，
+        /// 便于后置 mod 或内部工具在真正执行写入前先检查运行时约束。
+        /// </remarks>
+        public static Dictionary<string, object> QueryAccessPlanDiagnostics()
+        {
+            try
+            {
+                var samples = new List<object>();
+                var seen = new HashSet<object>();
+
+                void AddSample(object sample)
+                {
+                    if (sample == null) return;
+                    if (seen.Add(sample)) samples.Add(sample);
+                }
+
+                try
+                {
+                    if (UISelection != null && UISelection.TryGetCurrentItem(out var selected) && selected != null)
+                    {
+                        AddSample(selected);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ReportFacadeFailureOnce("QueryAccessPlanDiagnostics.sampleSelection", ex);
+                }
+
+                try
+                {
+                    foreach (var item in EnumerateAllKnownItems())
+                    {
+                        AddSample(item);
+                        if (samples.Count >= 64) break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ReportFacadeFailureOnce("QueryAccessPlanDiagnostics.enumerateKnownItems", ex);
+                }
+
+                return WriteService.CollectAccessPlanDiagnostics(samples);
+            }
+            catch (Exception ex)
+            {
+                ReportFacadeFailureOnce("QueryAccessPlanDiagnostics", ex);
+                return new Dictionary<string, object>();
+            }
+        }
+
         internal static void ResetQueryIndex()
         {
             try { (QueryV2 as ItemModKit.Adapters.Duckov.Locator.DuckovItemQueryV2)?.Clear(); } catch { }
@@ -1069,6 +1161,11 @@ namespace ItemModKit.Adapters.Duckov
         /// 用调用方提供的枚举器重建 QueryV2 索引。
         /// 适合在外部知道“全量物品集合”时主动触发重索引。
         /// </summary>
+        /// <remarks>
+        /// 这是兼容型 facade helper。
+        /// 重建过程中若单个对象无法转成 handle，会跳过该对象并记录一次性 diagnostics；
+        /// 若整次重建失败，当前方法仍保持 void 返回，但会输出一次性 facade diagnostics 日志。
+        /// </remarks>
         public static void ReindexAll(Func<IEnumerable<object>> enumerator)
         {
             try
@@ -1084,11 +1181,11 @@ namespace ItemModKit.Adapters.Duckov
                             var h = Adapters.Duckov.Locator.DuckovHandleFactory.CreateItemHandle(raw);
                             RegisterHandle(h);
                         }
-                        catch { }
+                        catch (Exception ex) { ReportFacadeFailureOnce("ReindexAll.registerHandle", ex); }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("ReindexAll", ex); }
         }
         private static IEnumerable<object> DefaultEnumerateAll()
         {
@@ -1113,10 +1210,10 @@ namespace ItemModKit.Adapters.Duckov
             {
                 var tCharacterMain = DuckovTypeUtils.FindType("CharacterMainControl") ?? DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.CharacterMainControl");
                 var main = tCharacterMain?.GetProperty("Main", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null, null);
-                var charItem = main?.GetType().GetProperty("CharacterItem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.GetValue(main, null);
-                return charItem?.GetType().GetProperty("Inventory", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(charItem, null);
+                var charItem = main != null ? DuckovReflectionCache.GetGetter(main.GetType(), "CharacterItem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.Invoke(main) : null;
+                return charItem != null ? DuckovReflectionCache.GetGetter(charItem.GetType(), "Inventory", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.Invoke(charItem) : null;
             }
-            catch { return null; }
+            catch (Exception ex) { ReportFacadeFailureOnce("GetCharacterInventory", ex); return null; }
         }
 
         internal static object GetStorageInventory()
@@ -1126,7 +1223,7 @@ namespace ItemModKit.Adapters.Duckov
                 var tPlayerStorage = DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.PlayerStorage") ?? DuckovTypeUtils.FindType("PlayerStorage");
                 return tPlayerStorage?.GetProperty("Inventory", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null, null);
             }
-            catch { return null; }
+            catch (Exception ex) { ReportFacadeFailureOnce("GetStorageInventory", ex); return null; }
         }
 
         internal static bool TryGetInventoryItem(object inventory, int index1Based, out object item)
@@ -1139,7 +1236,7 @@ namespace ItemModKit.Adapters.Duckov
 
             var index0Based = Math.Max(0, index1Based - 1);
             try { item = indexer.Invoke(inventory, new object[] { index0Based }); }
-            catch { item = null; }
+            catch (Exception ex) { ReportFacadeFailureOnce("TryGetInventoryItem", ex); item = null; }
             return item != null;
         }
 
@@ -1150,19 +1247,19 @@ namespace ItemModKit.Adapters.Duckov
             {
                 var tCharacterMain = DuckovTypeUtils.FindType("CharacterMainControl") ?? DuckovTypeUtils.FindType("TeamSoda.Duckov.Core.CharacterMainControl");
                 var main = tCharacterMain?.GetProperty("Main", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null, null);
-                var charItem = main?.GetType().GetProperty("CharacterItem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.GetValue(main, null);
-                var slots = charItem?.GetType().GetProperty("Slots", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(charItem, null) as System.Collections.IEnumerable;
+                var charItem = main != null ? DuckovReflectionCache.GetGetter(main.GetType(), "CharacterItem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.Invoke(main) : null;
+                var slots = charItem != null ? DuckovReflectionCache.GetGetter(charItem.GetType(), "Slots", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.Invoke(charItem) as System.Collections.IEnumerable : null;
                 if (slots == null) return false;
 
                 var index = 1;
                 foreach (var slot in slots)
                 {
                     if (index++ != slotIndex1Based) continue;
-                    item = slot?.GetType().GetProperty("Content", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(slot, null);
+                    item = slot != null ? DuckovReflectionCache.GetGetter(slot.GetType(), "Content", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.Invoke(slot) : null;
                     return item != null;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("TryGetWeaponSlotItem", ex); }
             return false;
         }
 
@@ -1175,23 +1272,14 @@ namespace ItemModKit.Adapters.Duckov
                 if (inventory != null) seen.Add(inventory);
             }
 
-            try
-            {
-                AddInventory(GetCharacterInventory());
-            }
-            catch { }
-
-            try
-            {
-                AddInventory(GetStorageInventory());
-            }
-            catch { }
+            AddInventory(GetCharacterInventory());
+            AddInventory(GetStorageInventory());
 
             try
             {
                 foreach (var inventory in s_inventoryClassifier.EnumerateLootBoxes()) AddInventory(inventory);
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("EnumerateKnownInventories.EnumerateLootBoxes", ex); }
 
             return seen;
         }
@@ -1202,7 +1290,7 @@ namespace ItemModKit.Adapters.Duckov
 
             int capacity = 0;
             try { capacity = Convert.ToInt32(inventory.GetType().GetProperty("Capacity", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(inventory, null) ?? 0); }
-            catch { capacity = 0; }
+            catch (Exception ex) { ReportFacadeFailureOnce("EnumerateInventoryItems.Capacity", ex); capacity = 0; }
 
             var indexer = inventory.GetType().GetMethod("get_Item", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             if (indexer == null) yield break;
@@ -1211,11 +1299,17 @@ namespace ItemModKit.Adapters.Duckov
             {
                 object item = null;
                 try { item = indexer.Invoke(inventory, new object[] { index }); }
-                catch { item = null; }
+                catch (Exception ex) { ReportFacadeFailureOnce("EnumerateInventoryItems.get_Item", ex); item = null; }
                 if (item != null) yield return item;
             }
         }
-        /// <summary>使用内置 inventory 枚举逻辑重建 QueryV2 索引。</summary>
+        /// <summary>
+        /// 使用内置 inventory 枚举逻辑重建 QueryV2 索引。
+        /// </summary>
+        /// <remarks>
+        /// 返回语义与 `ReindexAll(Func&lt;IEnumerable&lt;object&gt;&gt;)` 一致：
+        /// 失败时不抛出兼容层异常，但会输出一次性 facade diagnostics。
+        /// </remarks>
         public static void ReindexAll()
         {
             ReindexAll(DefaultEnumerateAll);
@@ -1225,30 +1319,57 @@ namespace ItemModKit.Adapters.Duckov
         /// 尝试获取当前 UI 选中的 handle。
         /// 成功时会自动注册到内部 handle 索引，便于后续 QueryV2 和 LogicalIds 复用。
         /// </summary>
+        /// <returns>
+        /// 成功时返回当前选中的 `IItemHandle`；
+        /// 若当前没有可解析的选中项，或解析过程中发生错误，则返回 `null`。
+        /// </returns>
+        /// <remarks>
+        /// 失败时会输出一次性 facade diagnostics 日志，帮助区分“当前确实没有选中项”和“选中项解析链路出错”。
+        /// </remarks>
         public static IItemHandle TryGetCurrentSelectedHandle()
         {
             try
             {
                 if (UISelectionV2.TryGetCurrent(out var h) && h != null) { RegisterHandle(h); return h; }
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("TryGetCurrentSelectedHandle", ex); }
             return null;
         }
 
-        /// <summary>刷新指定 handle 的缓存元数据，不重建 handle 本身。</summary>
+        /// <summary>
+        /// 刷新指定 handle 的缓存元数据，不重建 handle 本身。
+        /// </summary>
+        /// <remarks>
+        /// 传入 `null` 时直接忽略。
+        /// 若刷新过程中失败，当前方法保持 void 返回，但会输出一次性 facade diagnostics 日志。
+        /// </remarks>
         public static void RefreshHandleMetadata(IItemHandle handle)
         {
             if (handle == null) return;
-            try { handle.RefreshMetadata(); } catch { }
+            try { handle.RefreshMetadata(); }
+            catch (Exception ex) { ReportFacadeFailureOnce("RefreshHandleMetadata", ex); }
         }
 
-        /// <summary>按裸对象查找已经注册过的 handle；未注册时返回 null。</summary>
+        /// <summary>
+        /// 按裸对象查找已经注册过的 handle；未注册时返回 null。
+        /// </summary>
+        /// <returns>
+        /// 若该裸对象已注册到内部 handle 索引，则返回对应 `IItemHandle`；否则返回 `null`。
+        /// </returns>
         public static IItemHandle TryGetHandle(object raw)
         {
             if (raw == null) return null; s_handleMap.TryGetValue(raw, out var h); return h;
         }
 
-        /// <summary>按 InstanceId 查找已经注册过的 handle；未命中时返回 null。</summary>
+        /// <summary>
+        /// 按 InstanceId 查找已经注册过的 handle；未命中时返回 null。
+        /// </summary>
+        /// <returns>
+        /// 命中时返回对应 `IItemHandle`；未命中或遍历过程中发生错误时返回 `null`。
+        /// </returns>
+        /// <remarks>
+        /// 失败时会输出一次性 facade diagnostics 日志，而不是继续保持完全无声。
+        /// </remarks>
         public static IItemHandle TryGetHandleByInstanceId(int iid)
         {
             try
@@ -1258,24 +1379,38 @@ namespace ItemModKit.Adapters.Duckov
                     var h = kv.Value; if (h?.InstanceId == iid) return h;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportFacadeFailureOnce("TryGetHandleByInstanceId", ex); }
             return null;
         }
-        /// <summary>获取 QueryV2 的累计性能统计。</summary>
+        /// <summary>
+        /// 获取 QueryV2 的累计性能统计。
+        /// </summary>
+        /// <returns>
+        /// 成功时返回 `(avgMs, maxMs, queries)`；
+        /// 若 QueryV2 不可用或统计读取失败，则返回 `(0, 0, 0)`。
+        /// </returns>
+        /// <remarks>
+        /// 失败时会输出一次性 facade diagnostics 日志。
+        /// </remarks>
         public static (double avgMs, double maxMs, int queries) QueryPerfStats()
         {
             try
             {
                 var q = QueryV2 as ItemModKit.Adapters.Duckov.Locator.DuckovItemQueryV2; return q != null ? q.SnapshotPerf() : (0,0,0);
             }
-            catch { return (0,0,0); }
+            catch (Exception ex) { ReportFacadeFailureOnce("QueryPerfStats", ex); return (0,0,0); }
         }
         /// <summary>
         /// 手动刷新世界掉落扫描（若需要强制遍历）。常规情况下事件桥会提前登记，不必频繁调用。
         /// </summary>
+        /// <remarks>
+        /// 这是兼容型 facade helper。
+        /// 若刷新请求失败，当前方法保持 void 返回，但会输出一次性 facade diagnostics 日志。
+        /// </remarks>
         public static void ForceWorldDropRescan()
         {
-            try { WorldDrops?.RegisterExternalWorldItem(null); } catch { }
+            try { WorldDrops?.RegisterExternalWorldItem(null); }
+            catch (Exception ex) { ReportFacadeFailureOnce("ForceWorldDropRescan", ex); }
         }
     }
 }

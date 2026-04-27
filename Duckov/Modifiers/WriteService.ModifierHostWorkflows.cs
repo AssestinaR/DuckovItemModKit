@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Reflection;
 using ItemModKit.Core;
 
@@ -10,6 +11,45 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed partial class WriteService : IWriteService
     {
+        private static readonly ConcurrentDictionary<Type, ModifierHostAccessPlan> s_modifierHostPlans = new ConcurrentDictionary<Type, ModifierHostAccessPlan>();
+        private static readonly ConcurrentDictionary<Type, ModifierCollectionAccessPlan> s_modifierCollectionPlans = new ConcurrentDictionary<Type, ModifierCollectionAccessPlan>();
+
+        private sealed class ModifierHostAccessPlan
+        {
+            public Func<object, object> HostGetter;
+            public MethodInfo CreateHost;
+            public FieldInfo HostField;
+            public Action<object, object> HostSetter;
+        }
+
+        private sealed class ModifierCollectionAccessPlan
+        {
+            public MethodInfo Clear;
+            public MethodInfo Reapply;
+        }
+
+        private static ModifierHostAccessPlan GetModifierHostPlan(Type itemType)
+        {
+            return s_modifierHostPlans.GetOrAdd(itemType, static type => new ModifierHostAccessPlan
+            {
+                HostGetter = DuckovReflectionCache.GetGetter(type, "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                CreateHost = DuckovReflectionCache.GetMethod(type, "CreateModifiersComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
+                    ?? DuckovReflectionCache.GetMethod(type, "CreateModifiersComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                HostField = DuckovReflectionCache.GetField(type, "modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                HostSetter = DuckovReflectionCache.GetSetter(type, "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            });
+        }
+
+        private static ModifierCollectionAccessPlan GetModifierCollectionPlan(Type hostType)
+        {
+            return s_modifierCollectionPlans.GetOrAdd(hostType, static type => new ModifierCollectionAccessPlan
+            {
+                Clear = DuckovReflectionCache.GetMethod(type, "Clear", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    ?? DuckovReflectionCache.GetMethod(type, "ClearModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                Reapply = DuckovReflectionCache.GetMethod(type, "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            });
+        }
+
         /// <summary>
         /// 确保目标物品具备可写的 Modifier 宿主。
         /// 当宿主缺失时，会尝试调用运行时的 CreateModifiersComponent。
@@ -29,8 +69,8 @@ namespace ItemModKit.Adapters.Duckov
                     return RichResult.Success();
                 }
 
-                var create = DuckovReflectionCache.GetMethod(item.GetType(), "CreateModifiersComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
-                             ?? DuckovReflectionCache.GetMethod(item.GetType(), "CreateModifiersComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var plan = GetModifierHostPlan(item.GetType());
+                var create = plan.CreateHost;
                 if (create == null) return RichResult.Fail(ErrorCode.NotSupported, "CreateModifiersComponent not found");
 
                 create.Invoke(item, null);
@@ -65,15 +105,14 @@ namespace ItemModKit.Adapters.Duckov
 
                 TryClearModifierHost(host);
 
-                var field = DuckovReflectionCache.GetField(item.GetType(), "modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (field != null)
+                var plan = GetModifierHostPlan(item.GetType());
+                if (plan.HostField != null)
                 {
-                    field.SetValue(item, null);
+                    plan.HostField.SetValue(item, null);
                 }
                 else
                 {
-                    var setter = DuckovReflectionCache.GetSetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    setter?.Invoke(item, null);
+                    plan.HostSetter?.Invoke(item, null);
                 }
 
                 if (host is UnityEngine.Object unityObject)
@@ -133,7 +172,8 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                return DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                if (item == null) return null;
+                return GetModifierHostPlan(item.GetType()).HostGetter?.Invoke(item);
             }
             catch
             {
@@ -160,9 +200,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var clear = DuckovReflectionCache.GetMethod(host.GetType(), "Clear", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                            ?? DuckovReflectionCache.GetMethod(host.GetType(), "ClearModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                clear?.Invoke(host, null);
+                GetModifierCollectionPlan(host.GetType()).Clear?.Invoke(host, null);
             }
             catch
             {
@@ -178,8 +216,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var reapply = DuckovReflectionCache.GetMethod(host.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                reapply?.Invoke(host, null);
+                GetModifierCollectionPlan(host.GetType()).Reapply?.Invoke(host, null);
             }
             catch
             {

@@ -163,7 +163,7 @@ namespace ItemModKit.Adapters.Duckov
                 }
 
                 var removed = 0;
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var modsCol = GetModifierHost(item);
                 if (modsCol == null) return RichResult<int>.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
 
                 var list = modsCol as System.Collections.IEnumerable;
@@ -215,16 +215,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var statsIsNull = false;
-                try
-                {
-                    var p = item.GetType().GetProperty("Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var stats = p?.GetValue(item, null);
-                    statsIsNull = stats == null;
-                }
-                catch
-                {
-                }
+                var statsIsNull = GetStatsHost(item) == null;
 
                 if (statsIsNull) return RichResult.Success();
                 _item.ReapplyModifiers(item);
@@ -259,7 +250,7 @@ namespace ItemModKit.Adapters.Duckov
                 DebugLog("TryAddModifierDescription begin key=" + key + " value=" + value + " type=" + type);
                 var ensureHost = TryEnsureModifierHost(item);
                 if (!ensureHost.Ok) return ensureHost;
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var modsCol = GetModifierHost(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
 
                 var existing = (modsCol as System.Collections.IEnumerable)?.Cast<object>()
@@ -292,8 +283,7 @@ namespace ItemModKit.Adapters.Duckov
                               ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 addDesc?.Invoke(modsCol, new[] { inst });
 
-                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                reapply?.Invoke(modsCol, null);
+                TryInvokeModifierReapply(modsCol);
                 TryReapplyModifiers(item);
                 MarkDirtyFromWriteScope(item, DirtyKind.Modifiers);
                 return RichResult.Success();
@@ -317,7 +307,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var modsCol = GetModifierHost(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
 
                 object targetDesc = null;
@@ -337,8 +327,7 @@ namespace ItemModKit.Adapters.Duckov
                               ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 remove?.Invoke(modsCol, new[] { targetDesc });
 
-                var reapply = DuckovReflectionCache.GetMethod(modsCol.GetType(), "ReapplyModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                reapply?.Invoke(modsCol, null);
+                TryInvokeModifierReapply(modsCol);
                 TryReapplyModifiers(item);
                 MarkDirtyFromWriteScope(item, DirtyKind.Modifiers);
                 return RichResult.Success();
@@ -439,12 +428,10 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsCol = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var modsCol = GetModifierHost(item);
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
 
-                var clear = DuckovReflectionCache.GetMethod(modsCol.GetType(), "Clear", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                            ?? DuckovReflectionCache.GetMethod(modsCol.GetType(), "ClearModifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                clear?.Invoke(modsCol, null);
+                TryClearModifierHost(modsCol);
                 TryReapplyModifiers(item);
                 MarkDirtyFromWriteScope(item, DirtyKind.Modifiers);
                 return RichResult.Success();
@@ -467,7 +454,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (item == null) return RichResult.Fail(ErrorCode.InvalidArgument, "item is null");
-                var modsColObj = DuckovReflectionCache.GetGetter(item.GetType(), "Modifiers", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(item);
+                var modsColObj = GetModifierHost(item);
                 var modsCol = modsColObj as System.Collections.IEnumerable;
                 if (modsCol == null) return RichResult.Fail(ErrorCode.NotSupported, "Modifiers collection not found");
 

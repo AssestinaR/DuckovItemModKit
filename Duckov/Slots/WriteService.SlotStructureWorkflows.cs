@@ -25,14 +25,14 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "slot.invalid.owner");
-                var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var slots = GetSlotHost(ownerItem);
                 if (slots != null) return RichResult.Success();
 
-                var create = ownerItem.GetType().GetMethod("CreateSlotsComponent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                var create = GetSlotHostPlan(ownerItem.GetType()).CreateSlotsComponent;
                 if (create == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.host.create_missing");
 
                 create.Invoke(ownerItem, null);
-                slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                slots = GetSlotHost(ownerItem);
                 if (slots == null) return RichResult.Fail(ErrorCode.OperationFailed, "slot.host.create_failed");
 
                 NotifySlotAndChildChanged(ownerItem);
@@ -65,7 +65,7 @@ namespace ItemModKit.Adapters.Duckov
                     return ensureHost;
                 }
 
-                var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var slots = GetSlotHost(ownerItem);
                 if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "slot.owner.no_slots");
 
                 foreach (var options in desiredSlots)
@@ -91,7 +91,7 @@ namespace ItemModKit.Adapters.Duckov
                         return add;
                     }
 
-                    slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                    slots = GetSlotHost(ownerItem);
                     if (slots == null)
                     {
                         return RichResult.Fail(ErrorCode.OperationFailed, "slot.ensure.slot_host_lost");
@@ -115,7 +115,7 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (ownerItem == null || options == null) return RichResult.Fail(ErrorCode.InvalidArgument, "null args");
-                var slots = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var slots = GetSlotHost(ownerItem);
                 if (slots == null) return RichResult.Fail(ErrorCode.NotSupported, "no Slots on owner");
                 var slotType = ResolveRuntimeSlotType(slots);
                 if (slotType == null) return RichResult.Fail(ErrorCode.NotSupported, "Slot type missing");

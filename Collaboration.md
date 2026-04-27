@@ -113,6 +113,43 @@ if (rep.Ok) var newItem = rep.Value;
 - 大量连续操作请 `yield` 或分帧执行，避免 UI 卡顿。
 - 事件发布尽量去重与合并，减少风暴。
 
+## 10.5 运行时加固规则
+
+后续修改 IMK 运行时代码时，默认额外遵守下面几条。
+
+### A. 异常处理分层
+- `public contract path`：下游 mod 可能直接调用，或直接影响公开返回结果的路径。
+- `internal workflow path`：restore、rebirth、persistence、state replay 这类内部流程路径。
+- `best-effort auxiliary path`：debug log、metrics、非关键 UI 刷新、附加 diagnostics 记录。
+
+### B. `public contract path` 规则
+- 禁止新增裸 `catch { }`。
+- 失败时优先返回 `RichResult.Fail(...)`。
+- 错误信息至少说明失败动作与缺失约束，不要只返回空值或静默降级。
+- 若现有兼容签名无法返回 `RichResult`，至少补充稳定日志或 diagnostics 记录点。
+
+### C. `internal workflow path` 规则
+- 可以做局部保护，但不能让“主结果失败”无声消失。
+- 主结果失败应尽量向上冒泡到结构化结果对象、最终 `RichResult` 或稳定 diagnostics。
+- 只有附加步骤失败时，才允许退化为 best-effort。
+
+### D. `best-effort auxiliary path` 规则
+- 允许保护性吞异常。
+- 但应只用于不改变业务主结果的路径。
+- 若后续需要排查，应能补接 debug log、计数器或最近错误缓冲，而不是完全无痕。
+
+### E. 反射规则
+- 新增高频反射逻辑时，默认先进缓存或 access plan。
+- 不要在热路径直接散写 `GetProperty`、`GetMethod`、`GetField` 多级试探链。
+- 运行期优先执行已解析约束；结构探测尽量前移到初始化或首次命中阶段。
+
+### F. facade 注释风格
+- 对公开 facade helper，如果返回值本身承载了“失败时的默认行为”，应在 XML 注释里直接写清楚。
+- `Try*` 风格方法：优先在 `returns` 或 `remarks` 中写明成功、未命中、失败时分别返回什么。
+- 保兼容的 `void` helper：若失败时不会抛出兼容层异常，应在 `remarks` 中写明会通过 diagnostics 或日志暴露失败。
+- 元组返回值：应写清每个槽位的语义，以及失败时的零值约定。
+- 注释的目标不是解释实现细节，而是让后置 mod 作者不用翻源码也能理解“该怎么判断失败”。
+
 ## 11. 示例：跨模组“代工改名 + 标记 + 归还位置”
 ```csharp
 var owner = "YourMod";

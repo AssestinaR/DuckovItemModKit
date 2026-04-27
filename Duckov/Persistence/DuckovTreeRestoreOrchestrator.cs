@@ -9,6 +9,28 @@ namespace ItemModKit.Adapters.Duckov
     {
         internal static readonly ITreeRestoreOrchestrator Shared = new DuckovTreeRestoreOrchestrator();
 
+        private static void RecordPhaseFailure(RestoreDiagnostics diagnostics, RestorePhase phase, string action, Exception ex)
+        {
+            diagnostics?.Metadata["failurePhase"] = phase.ToString();
+            diagnostics?.Metadata["failureAction"] = action ?? string.Empty;
+            diagnostics?.Metadata[$"phase.{phase}.exception"] = ex.ToString();
+            Log.Error($"[IMK.Restore] {phase} failed at {action}", ex);
+        }
+
+        private static void RecordPhaseAuxFailure(RestoreDiagnostics diagnostics, RestorePhase phase, string action, Exception ex)
+        {
+            diagnostics?.Metadata[$"phase.{phase}.degraded.{action}"] = ex.Message;
+            Log.Warn($"[IMK.Restore] {phase} degraded at {action}: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        private static RichResult<RestoreResult> FailExecution(RestoreRequest request, RestoreDiagnostics diagnostics, RestoreResult result, string strategyUsed, RestorePhase phase, string error, bool attached = false, bool deferred = false, bool targetResolved = false, int attachedIndex = -1, bool targetRequested = false, bool requestedTargetResolved = false, bool fallbackTargetUsed = false)
+        {
+            result.FinalPhase = RestorePhase.Failed;
+            FinalizeDiagnostics(diagnostics, result, strategyUsed, request, attached, deferred, targetResolved, attachedIndex, targetRequested, requestedTargetResolved, fallbackTargetUsed);
+            NotifyDiagnosticsFinalized(request, diagnostics, result);
+            return RichResult<RestoreResult>.Fail(ErrorCode.OperationFailed, error ?? "restore failed");
+        }
+
         public RichResult<RestoreResult> Execute(RestoreRequest request)
         {
             if (request == null) return RichResult<RestoreResult>.Fail(ErrorCode.InvalidArgument, "restore request null");
@@ -74,34 +96,74 @@ namespace ItemModKit.Adapters.Duckov
             }
 
             result.FinalPhase = RestorePhase.Hydrate;
-            TrackPhase(diagnostics, RestorePhase.Hydrate, () =>
+            string hydrateFailure = null;
+            try
             {
-                if (request.CustomHydrate != null)
+                TrackPhase(diagnostics, RestorePhase.Hydrate, () =>
                 {
-                    try { request.CustomHydrate(newItem); } catch { }
-                }
-
-                if (request.SourceKind == RestoreSourceKind.Persistence && request.Source is ItemMeta meta)
-                {
-                    try { IMKDuckov.Persistence.RecordMeta(newItem, meta, writeVariables: true); } catch { }
-                    try { IMKDuckov.Persistence.EnsureApplied(newItem); } catch { }
-                    return;
-                }
-
-                if (request.VariableMergeMode != VariableMergeMode.None)
-                {
-                    try { IMKDuckov.VariableMerge.Merge(request.Source, newItem, request.VariableMergeMode, acceptKey: request.AcceptVariableKey); } catch { }
-                }
-                if (request.CopyTags)
-                {
-                    try
+                    if (request.CustomHydrate != null)
                     {
-                        var tags = IMKDuckov.Item.GetTags(request.Source) ?? Array.Empty<string>();
-                        if (tags.Length > 0) IMKDuckov.Write.TryWriteTags(newItem, tags, merge: true);
+                        try { request.CustomHydrate(newItem); }
+                        catch (Exception ex)
+                        {
+                            hydrateFailure = "custom hydrate failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "customHydrate", ex);
+                        }
                     }
-                    catch { }
-                }
-            });
+
+                    if (request.SourceKind == RestoreSourceKind.Persistence && request.Source is ItemMeta meta)
+                    {
+                        try { IMKDuckov.Persistence.RecordMeta(newItem, meta, writeVariables: true); }
+                        catch (Exception ex)
+                        {
+                            hydrateFailure = hydrateFailure ?? "persistence meta record failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "recordMeta", ex);
+                        }
+
+                        try { IMKDuckov.Persistence.EnsureApplied(newItem); }
+                        catch (Exception ex)
+                        {
+                            hydrateFailure = hydrateFailure ?? "persistence ensure apply failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "ensureApplied", ex);
+                        }
+
+                        return;
+                    }
+
+                    if (request.VariableMergeMode != VariableMergeMode.None)
+                    {
+                        try { IMKDuckov.VariableMerge.Merge(request.Source, newItem, request.VariableMergeMode, acceptKey: request.AcceptVariableKey); }
+                        catch (Exception ex)
+                        {
+                            hydrateFailure = hydrateFailure ?? "variable merge failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "variableMerge", ex);
+                        }
+                    }
+                    if (request.CopyTags)
+                    {
+                        try
+                        {
+                            var tags = IMKDuckov.Item.GetTags(request.Source) ?? Array.Empty<string>();
+                            if (tags.Length > 0) IMKDuckov.Write.TryWriteTags(newItem, tags, merge: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            hydrateFailure = hydrateFailure ?? "copy tags failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "copyTags", ex);
+                        }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                RecordPhaseFailure(diagnostics, RestorePhase.Hydrate, "unhandled", ex);
+                hydrateFailure = hydrateFailure ?? "hydrate phase failed";
+            }
+
+            if (!string.IsNullOrEmpty(hydrateFailure))
+            {
+                return FailExecution(request, diagnostics, result, usedStrategy, RestorePhase.Hydrate, hydrateFailure);
+            }
 
             result.FinalPhase = RestorePhase.Attach;
             var attached = false;
@@ -112,70 +174,100 @@ namespace ItemModKit.Adapters.Duckov
             var requestedTargetResolved = false;
             var fallbackTargetUsed = false;
             var attachTargetResolved = false;
-            TrackPhase(diagnostics, RestorePhase.Attach, () =>
+            string attachFailure = null;
+            try
             {
-                if (request.TargetMode == RestoreTargetMode.AttachToCharacter)
+                TrackPhase(diagnostics, RestorePhase.Attach, () =>
                 {
-                    targetRequested = true;
-                    requestedTargetResolved = true;
-                    attachTargetResolved = true;
-                    try
+                    if (request.TargetMode == RestoreTargetMode.AttachToCharacter)
                     {
-                        attached = IMKDuckov.Slot.TryPlugToCharacter(newItem, request.PreferredCharacterSlotIndex);
-                        attachedIndex = attached ? request.PreferredCharacterSlotIndex : -1;
-                    }
-                    catch { attached = false; attachedIndex = -1; }
-                    return;
-                }
-
-                if (request.TargetMode == RestoreTargetMode.AttachToExplicitSlot)
-                {
-                    targetRequested = true;
-                    requestedTargetResolved = request.Target != null && !string.IsNullOrEmpty(request.PreferredSlotKey);
-                    attachTargetResolved = requestedTargetResolved;
-                    try
-                    {
-                        var plug = IMKDuckov.Write.TryPlugIntoSlot(request.Target, request.PreferredSlotKey, newItem);
-                        attached = plug.Ok;
-                    }
-                    catch { attached = false; }
-                    return;
-                }
-
-                var targetInfo = ResolveTargetInventoryInfo(request);
-                inventory = targetInfo.inventory;
-                targetRequested = targetInfo.targetRequested;
-                requestedTargetResolved = targetInfo.requestedTargetResolved;
-                fallbackTargetUsed = targetInfo.fallbackTargetUsed;
-                attachTargetResolved = inventory != null;
-                if (inventory == null) return;
-
-                try
-                {
-                    if (request.PreferredInventoryIndex >= 0)
-                    {
-                        attached = IMKDuckov.Inventory.AddAt(inventory, newItem, request.PreferredInventoryIndex);
-                        if (attached)
+                        targetRequested = true;
+                        requestedTargetResolved = true;
+                        attachTargetResolved = true;
+                        try
                         {
-                            attachedIndex = request.PreferredInventoryIndex;
+                            attached = IMKDuckov.Slot.TryPlugToCharacter(newItem, request.PreferredCharacterSlotIndex);
+                            attachedIndex = attached ? request.PreferredCharacterSlotIndex : -1;
+                        }
+                        catch (Exception ex)
+                        {
+                            attached = false;
+                            attachedIndex = -1;
+                            attachFailure = "attach to character failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Attach, "attachToCharacter", ex);
+                        }
+                        return;
+                    }
+
+                    if (request.TargetMode == RestoreTargetMode.AttachToExplicitSlot)
+                    {
+                        targetRequested = true;
+                        requestedTargetResolved = request.Target != null && !string.IsNullOrEmpty(request.PreferredSlotKey);
+                        attachTargetResolved = requestedTargetResolved;
+                        try
+                        {
+                            var plug = IMKDuckov.Write.TryPlugIntoSlot(request.Target, request.PreferredSlotKey, newItem);
+                            attached = plug.Ok;
+                        }
+                        catch (Exception ex)
+                        {
+                            attached = false;
+                            attachFailure = "attach to explicit slot failed";
+                            RecordPhaseFailure(diagnostics, RestorePhase.Attach, "attachToExplicitSlot", ex);
+                        }
+                        return;
+                    }
+
+                    var targetInfo = ResolveTargetInventoryInfo(request);
+                    inventory = targetInfo.inventory;
+                    targetRequested = targetInfo.targetRequested;
+                    requestedTargetResolved = targetInfo.requestedTargetResolved;
+                    fallbackTargetUsed = targetInfo.fallbackTargetUsed;
+                    attachTargetResolved = inventory != null;
+                    if (inventory == null) return;
+
+                    try
+                    {
+                        if (request.PreferredInventoryIndex >= 0)
+                        {
+                            attached = IMKDuckov.Inventory.AddAt(inventory, newItem, request.PreferredInventoryIndex);
+                            if (attached)
+                            {
+                                attachedIndex = request.PreferredInventoryIndex;
+                            }
+                        }
+
+                        if (!attached)
+                        {
+                            var placement = IMKDuckov.InventoryPlacement.TryPlace(inventory, newItem, allowMerge: true, enableDeferredRetry: true);
+                            attached = placement.added;
+                            attachedIndex = placement.index;
+                            deferred = placement.deferredScheduled;
                         }
                     }
-
-                    if (!attached)
+                    catch (Exception ex)
                     {
-                        var placement = IMKDuckov.InventoryPlacement.TryPlace(inventory, newItem, allowMerge: true, enableDeferredRetry: true);
-                        attached = placement.added;
-                        attachedIndex = placement.index;
-                        deferred = placement.deferredScheduled;
+                        attachFailure = "inventory attach failed";
+                        RecordPhaseFailure(diagnostics, RestorePhase.Attach, "attachToInventory", ex);
                     }
-                }
-                catch { }
 
-                if (request.RefreshUI)
-                {
-                    IMKDuckov.UIRefresh.RefreshInventory(inventory);
-                }
-            });
+                    if (request.RefreshUI)
+                    {
+                        try { IMKDuckov.UIRefresh.RefreshInventory(inventory); }
+                        catch (Exception ex) { RecordPhaseAuxFailure(diagnostics, RestorePhase.Attach, "refreshUI", ex); }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                RecordPhaseFailure(diagnostics, RestorePhase.Attach, "unhandled", ex);
+                attachFailure = attachFailure ?? "attach phase failed";
+            }
+
+            if (!string.IsNullOrEmpty(attachFailure))
+            {
+                return FailExecution(request, diagnostics, result, usedStrategy, RestorePhase.Attach, attachFailure, attached, deferred, attachTargetResolved, attachedIndex, targetRequested, requestedTargetResolved, fallbackTargetUsed);
+            }
 
             result.FinalPhase = RestorePhase.Finalize;
             TrackPhase(diagnostics, RestorePhase.Finalize, () =>
@@ -187,7 +279,7 @@ namespace ItemModKit.Adapters.Duckov
                     IMKDuckov.LogicalIds.Bind(oldHandle, newHandle);
                     IMKDuckov.RegisterHandle(newHandle);
                 }
-                catch { }
+                catch (Exception ex) { RecordPhaseAuxFailure(diagnostics, RestorePhase.Finalize, "bindLogicalIds", ex); }
             });
 
             result.RootItem = newItem;
@@ -347,7 +439,8 @@ namespace ItemModKit.Adapters.Duckov
 
         private static void NotifyDiagnosticsFinalized(RestoreRequest request, RestoreDiagnostics diagnostics, RestoreResult result)
         {
-            try { request?.DiagnosticsFinalized?.Invoke(diagnostics, result); } catch { }
+            try { request?.DiagnosticsFinalized?.Invoke(diagnostics, result); }
+            catch (Exception ex) { RecordPhaseAuxFailure(diagnostics, RestorePhase.Finalize, "diagnosticsFinalizedCallback", ex); }
         }
 
         private static string ResolveAttachOutcome(RestoreRequest request, bool attached, bool deferred, bool targetResolved, bool targetRequested, bool requestedTargetResolved, bool fallbackTargetUsed)

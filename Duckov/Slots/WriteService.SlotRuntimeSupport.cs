@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using ItemModKit.Core;
@@ -11,6 +12,66 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed partial class WriteService : IWriteService
     {
+        private static readonly ConcurrentDictionary<Type, SlotHostAccessPlan> s_slotHostPlans = new ConcurrentDictionary<Type, SlotHostAccessPlan>();
+        private static readonly ConcurrentDictionary<Type, SlotCollectionAccessPlan> s_slotCollectionPlans = new ConcurrentDictionary<Type, SlotCollectionAccessPlan>();
+        private static readonly ConcurrentDictionary<Type, SlotInstanceAccessPlan> s_slotInstancePlans = new ConcurrentDictionary<Type, SlotInstanceAccessPlan>();
+
+        private sealed class SlotHostAccessPlan
+        {
+            public Func<object, object> SlotsGetter;
+            public MethodInfo CreateSlotsComponent;
+        }
+
+        private sealed class SlotCollectionAccessPlan
+        {
+            public MethodInfo GetSlotByKey;
+            public FieldInfo BackingListField;
+            public FieldInfo CachedDictionaryField;
+        }
+
+        private sealed class SlotInstanceAccessPlan
+        {
+            public PropertyInfo ContentProperty;
+            public MethodInfo Unplug;
+            public MethodInfo Changed;
+        }
+
+        private static SlotHostAccessPlan GetSlotHostPlan(Type ownerType)
+        {
+            return s_slotHostPlans.GetOrAdd(ownerType, static type => new SlotHostAccessPlan
+            {
+                SlotsGetter = DuckovReflectionCache.GetGetter(type, "Slots", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                CreateSlotsComponent = DuckovReflectionCache.GetMethod(type, "CreateSlotsComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
+                    ?? DuckovReflectionCache.GetMethod(type, "CreateSlotsComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            });
+        }
+
+        private static SlotCollectionAccessPlan GetSlotCollectionPlan(Type slotsType)
+        {
+            return s_slotCollectionPlans.GetOrAdd(slotsType, static type => new SlotCollectionAccessPlan
+            {
+                GetSlotByKey = DuckovReflectionCache.GetMethod(type, "GetSlot", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) }),
+                BackingListField = DuckovReflectionCache.GetField(type, "list", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                CachedDictionaryField = DuckovReflectionCache.GetField(type, "_cachedSlotsDictionary", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            });
+        }
+
+        private static SlotInstanceAccessPlan GetSlotInstancePlan(Type slotType)
+        {
+            return s_slotInstancePlans.GetOrAdd(slotType, static type => new SlotInstanceAccessPlan
+            {
+                ContentProperty = DuckovReflectionCache.GetProp(type, "Content", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                Unplug = DuckovReflectionCache.GetMethod(type, "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                Changed = DuckovReflectionCache.GetMethod(type, "ForceInvokeSlotContentChangedEvent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            });
+        }
+
+        private static object GetSlotHost(object ownerItem)
+        {
+            if (ownerItem == null) return null;
+            return GetSlotHostPlan(ownerItem.GetType()).SlotsGetter?.Invoke(ownerItem);
+        }
+
         /// <summary>
         /// 按槽位键解析运行时槽位对象。
         /// 优先调用宿主槽位集合的 GetSlot(string)，失败时回退到枚举匹配。
@@ -21,8 +82,8 @@ namespace ItemModKit.Adapters.Duckov
         private static object ResolveSlot(object slots, string slotKey)
         {
             if (slots == null || string.IsNullOrEmpty(slotKey)) return null;
-            var t = slots.GetType();
-            var getSlotStr = DuckovReflectionCache.GetMethod(t, "GetSlot", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
+            var plan = GetSlotCollectionPlan(slots.GetType());
+            var getSlotStr = plan.GetSlotByKey;
             if (getSlotStr != null)
             {
                 try { var v = getSlotStr.Invoke(slots, new object[] { slotKey }); if (v != null) return v; } catch { }
@@ -59,7 +120,7 @@ namespace ItemModKit.Adapters.Duckov
             if (slot == null) return false;
             try
             {
-                var cp = DuckovReflectionCache.GetProp(slot.GetType(), "Content", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var cp = GetSlotInstancePlan(slot.GetType()).ContentProperty;
                 content = cp?.GetValue(slot, null);
                 return content != null;
             }
@@ -152,8 +213,7 @@ namespace ItemModKit.Adapters.Duckov
 
             try
             {
-                var listField = DuckovReflectionCache.GetField(slots.GetType(), "list", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var list = listField?.GetValue(slots);
+                var list = GetSlotCollectionPlan(slots.GetType()).BackingListField?.GetValue(slots);
                 if (list != null)
                 {
                     var remove = DuckovReflectionCache.GetMethod(list.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { slot.GetType() })
@@ -184,8 +244,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var cacheField = DuckovReflectionCache.GetField(slots.GetType(), "_cachedSlotsDictionary", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                cacheField?.SetValue(slots, null);
+                GetSlotCollectionPlan(slots.GetType()).CachedDictionaryField?.SetValue(slots, null);
             }
             catch
             {
@@ -201,8 +260,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var changed = DuckovReflectionCache.GetMethod(slot.GetType(), "ForceInvokeSlotContentChangedEvent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                changed?.Invoke(slot, null);
+                GetSlotInstancePlan(slot.GetType()).Changed?.Invoke(slot, null);
             }
             catch
             {
@@ -218,8 +276,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var unplug = DuckovReflectionCache.GetMethod(slot.GetType(), "Unplug", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                return unplug?.Invoke(slot, null);
+                return GetSlotInstancePlan(slot.GetType()).Unplug?.Invoke(slot, null);
             }
             catch
             {

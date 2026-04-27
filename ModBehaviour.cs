@@ -12,14 +12,20 @@ namespace ItemModKit
     {
         private static bool s_patchesInstalled;
 
+        private static void ReportLifecycleFailureOnce(string operation, Exception ex)
+        {
+            if (string.IsNullOrEmpty(operation) || ex == null) return;
+            Adapters.Duckov.IMKDuckov.Log.Warn($"[IMK.ModBehaviour] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
+        }
+
         /// <summary>
         /// Unity Awake：初始化事件桥。
         /// </summary>
         void Awake()
         {
             // 初始化事件桥
-            try { Adapters.Duckov.DuckovEventBridge.Initialize(); } catch { }
-            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Initialize(); } catch { }
+            try { Adapters.Duckov.DuckovEventBridge.Initialize(); } catch (Exception ex) { ReportLifecycleFailureOnce("Awake.InitializeEventBridge", ex); }
+            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Initialize(); } catch (Exception ex) { ReportLifecycleFailureOnce("Awake.InitializePersistenceLifecycleBridge", ex); }
             if (!s_patchesInstalled)
             {
                 try
@@ -27,7 +33,7 @@ namespace ItemModKit
                     new Harmony("mod.itemmodkit.persistence").PatchAll();
                     s_patchesInstalled = true;
                 }
-                catch { }
+                catch (Exception ex) { ReportLifecycleFailureOnce("Awake.PatchAll", ex); }
             }
         }
 
@@ -36,9 +42,9 @@ namespace ItemModKit
         /// </summary>
         void OnDestroy()
         {
-            try { Adapters.Duckov.IMKDuckov.FlushAllDirty("scene unload"); } catch { }
-            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Dispose(); } catch { }
-            try { Adapters.Duckov.DuckovEventBridge.Dispose(); } catch { }
+            try { Adapters.Duckov.IMKDuckov.FlushAllDirty("scene unload"); } catch (Exception ex) { ReportLifecycleFailureOnce("OnDestroy.FlushAllDirty", ex); }
+            try { Adapters.Duckov.DuckovPersistenceLifecycleBridge.Dispose(); } catch (Exception ex) { ReportLifecycleFailureOnce("OnDestroy.DisposePersistenceLifecycleBridge", ex); }
+            try { Adapters.Duckov.DuckovEventBridge.Dispose(); } catch (Exception ex) { ReportLifecycleFailureOnce("OnDestroy.DisposeEventBridge", ex); }
         }
 
         /// <summary>
@@ -46,7 +52,7 @@ namespace ItemModKit
         /// </summary>
         void OnApplicationQuit()
         {
-            try { Adapters.Duckov.IMKDuckov.FlushAllDirty("application quit"); } catch { }
+            try { Adapters.Duckov.IMKDuckov.FlushAllDirty("application quit"); } catch (Exception ex) { ReportLifecycleFailureOnce("OnApplicationQuit.FlushAllDirty", ex); }
         }
 
         /// <summary>
@@ -62,7 +68,7 @@ namespace ItemModKit
                 {
                     if (Time.frameCount % 300 == 0)
                     {
-                        try { if (Adapters.Duckov.IMKDuckov.TryGetCurrentSelectedHandle() != null) events.HintActive(2f); } catch { }
+                        try { if (Adapters.Duckov.IMKDuckov.TryGetCurrentSelectedHandle() != null) events.HintActive(2f); } catch (Exception ex) { ReportLifecycleFailureOnce("Update.HintActive", ex); }
                     }
                     events.Tick();
                 }
@@ -78,7 +84,7 @@ namespace ItemModKit
                     persistence.Tick(null);
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportLifecycleFailureOnce("Update", ex); }
         }
     }
 }

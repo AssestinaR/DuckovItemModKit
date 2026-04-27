@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
 using ItemModKit.Core;
@@ -12,6 +13,180 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed partial class WriteService : IWriteService
     {
+        private const BindingFlags InstanceFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        private static readonly Type[] s_stringArg = { typeof(string) };
+        private static readonly Type[] s_floatArg = { typeof(float) };
+        private static readonly Type[] s_doubleArg = { typeof(double) };
+
+        private static readonly ConcurrentDictionary<Type, StatsHostAccessPlan> s_statsHostPlans = new ConcurrentDictionary<Type, StatsHostAccessPlan>();
+        private static readonly ConcurrentDictionary<Type, StatsCollectionAccessPlan> s_statsCollectionPlans = new ConcurrentDictionary<Type, StatsCollectionAccessPlan>();
+        private static readonly ConcurrentDictionary<Type, StatValueWritePlan> s_statValueWritePlans = new ConcurrentDictionary<Type, StatValueWritePlan>();
+
+        private sealed class StatsHostAccessPlan
+        {
+            public Func<object, object> StatsGetter;
+            public MethodInfo CreateStatsComponent;
+            public FieldInfo StatsField;
+            public Action<object, object> StatsSetter;
+        }
+
+        private sealed class StatsCollectionAccessPlan
+        {
+            public MethodInfo GetByIndexer;
+            public MethodInfo GetByKey;
+            public MethodInfo AddUntyped;
+            public MethodInfo Clear;
+            public MethodInfo SetDirty;
+            public FieldInfo BackingListField;
+        }
+
+        private sealed class StatValueWritePlan
+        {
+            public Action<object, object> BaseValueSetter;
+            public MethodInfo[] ValueMethods;
+            public Action<object, object>[] PropertySetters;
+            public FieldInfo[] WritableFields;
+        }
+
+        private static StatsHostAccessPlan GetStatsHostPlan(Type ownerType)
+        {
+            return s_statsHostPlans.GetOrAdd(ownerType, static owner => new StatsHostAccessPlan
+            {
+                StatsGetter = DuckovReflectionCache.GetGetter(owner, "Stats", InstanceFlags),
+                CreateStatsComponent = DuckovReflectionCache.GetMethod(owner, "CreateStatsComponent", InstanceFlags, Type.EmptyTypes)
+                    ?? DuckovReflectionCache.GetMethod(owner, "CreateStatsComponent", InstanceFlags),
+                StatsField = DuckovReflectionCache.GetField(owner, "stats", InstanceFlags),
+                StatsSetter = DuckovReflectionCache.GetSetter(owner, "Stats", InstanceFlags),
+            });
+        }
+
+        private static StatsCollectionAccessPlan GetStatsCollectionPlan(Type statsType)
+        {
+            return s_statsCollectionPlans.GetOrAdd(statsType, static stats => new StatsCollectionAccessPlan
+            {
+                GetByIndexer = DuckovReflectionCache.GetMethod(stats, "get_Item", InstanceFlags, s_stringArg),
+                GetByKey = DuckovReflectionCache.GetMethod(stats, "GetStat", InstanceFlags, s_stringArg),
+                AddUntyped = DuckovReflectionCache.GetMethod(stats, "Add", InstanceFlags),
+                Clear = DuckovReflectionCache.GetMethod(stats, "Clear", InstanceFlags),
+                SetDirty = DuckovReflectionCache.GetMethod(stats, "SetDirty", InstanceFlags),
+                BackingListField = DuckovReflectionCache.GetField(stats, "list", InstanceFlags),
+            });
+        }
+
+        private static StatValueWritePlan GetStatValueWritePlan(Type statType)
+        {
+            return s_statValueWritePlans.GetOrAdd(statType, static stat =>
+            {
+                var methods = new System.Collections.Generic.List<MethodInfo>();
+                foreach (var methodName in new[] { "SetBaseValue", "SetValue", "Set" })
+                {
+                    var method = DuckovReflectionCache.GetMethod(stat, methodName, InstanceFlags, s_floatArg)
+                        ?? DuckovReflectionCache.GetMethod(stat, methodName, InstanceFlags, s_doubleArg)
+                        ?? DuckovReflectionCache.GetMethod(stat, methodName, InstanceFlags);
+                    if (method != null && !methods.Contains(method)) methods.Add(method);
+                }
+
+                var setters = new System.Collections.Generic.List<Action<object, object>>();
+                foreach (var propertyName in new[] { "BaseValue", "CurrentValue", "Amount", "Value" })
+                {
+                    var setter = DuckovReflectionCache.GetSetter(stat, propertyName, InstanceFlags);
+                    if (setter != null && !setters.Contains(setter)) setters.Add(setter);
+                }
+
+                var fields = new System.Collections.Generic.List<FieldInfo>();
+                foreach (var fieldName in new[] { "BaseValue", "m_BaseValue", "_baseValue", "Value", "m_Value", "_value" })
+                {
+                    var field = DuckovReflectionCache.GetField(stat, fieldName, InstanceFlags);
+                    if (field != null && !field.IsInitOnly && !fields.Contains(field)) fields.Add(field);
+                }
+
+                return new StatValueWritePlan
+                {
+                    BaseValueSetter = DuckovReflectionCache.GetSetter(stat, "BaseValue", InstanceFlags),
+                    ValueMethods = methods.ToArray(),
+                    PropertySetters = setters.ToArray(),
+                    WritableFields = fields.ToArray(),
+                };
+            });
+        }
+
+        private static object GetStatsHost(object ownerItem)
+        {
+            if (ownerItem == null) return null;
+            var plan = GetStatsHostPlan(ownerItem.GetType());
+            return plan.StatsGetter?.Invoke(ownerItem);
+        }
+
+        private static object FindStatByKey(object stats, string statKey)
+        {
+            if (stats == null || string.IsNullOrEmpty(statKey)) return null;
+
+            var plan = GetStatsCollectionPlan(stats.GetType());
+            if (plan.GetByIndexer != null)
+            {
+                var stat = plan.GetByIndexer.Invoke(stats, new object[] { statKey });
+                if (stat != null) return stat;
+            }
+
+            if (plan.GetByKey != null)
+            {
+                return plan.GetByKey.Invoke(stats, new object[] { statKey });
+            }
+
+            return null;
+        }
+
+        private static bool TryWriteStatValueViaPlan(object stat, float value)
+        {
+            if (stat == null) return false;
+
+            var plan = GetStatValueWritePlan(stat.GetType());
+            if (plan.BaseValueSetter != null)
+            {
+                plan.BaseValueSetter(stat, value);
+                return true;
+            }
+
+            foreach (var method in plan.ValueMethods)
+            {
+                if (method == null) continue;
+                var parameters = method.GetParameters();
+                if (parameters.Length != 1) continue;
+
+                object arg = value;
+                try { arg = Convert.ChangeType(value, parameters[0].ParameterType, CultureInfo.InvariantCulture); } catch { }
+
+                try
+                {
+                    method.Invoke(stat, new[] { arg });
+                    return true;
+                }
+                catch { }
+            }
+
+            foreach (var setter in plan.PropertySetters)
+            {
+                if (setter == null) continue;
+                setter(stat, value);
+                return true;
+            }
+
+            foreach (var field in plan.WritableFields)
+            {
+                if (field == null) continue;
+                try
+                {
+                    object arg = value;
+                    try { arg = Convert.ChangeType(value, field.FieldType, CultureInfo.InvariantCulture); } catch { }
+                    field.SetValue(stat, arg);
+                    return true;
+                }
+                catch { }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// 设置指定 stat 的基础值。
         /// 优先走 BaseValue setter，失败时再回退到兼容方法、属性或字段写入路径。
@@ -26,60 +201,16 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
                 if (string.IsNullOrEmpty(statKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "statKey null");
-                var stats = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var stats = GetStatsHost(ownerItem);
                 if (stats == null) return RichResult.Fail(ErrorCode.NotSupported, "no Stats on owner");
-                object stat = null;
-                var indexer = DuckovReflectionCache.GetMethod(stats.GetType(), "get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
-                if (indexer != null) { stat = indexer.Invoke(stats, new object[] { statKey }); }
-                if (stat == null)
-                {
-                    var getStat = DuckovReflectionCache.GetMethod(stats.GetType(), "GetStat", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
-                    if (getStat != null) stat = getStat.Invoke(stats, new object[] { statKey });
-                }
+                var stat = FindStatByKey(stats, statKey);
                 if (stat == null) return RichResult.Fail(ErrorCode.NotFound, "stat not found");
 
-                var setVal = DuckovReflectionCache.GetSetter(stat.GetType(), "BaseValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (setVal != null)
+                if (TryWriteStatValueViaPlan(stat, value))
                 {
-                    setVal(stat, value);
                     _item.ReapplyModifiers(ownerItem);
                     IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats);
                     return RichResult.Success();
-                }
-
-                foreach (var mname in new[] { "SetBaseValue", "SetValue", "Set" })
-                {
-                    var m = DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(float) })
-                            ?? DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(double) })
-                            ?? DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (m == null) continue;
-                    var ps = m.GetParameters();
-                    if (ps.Length != 1) continue;
-                    object arg = value;
-                    try { arg = Convert.ChangeType(value, ps[0].ParameterType, CultureInfo.InvariantCulture); } catch { }
-                    try { m.Invoke(stat, new[] { arg }); _item.ReapplyModifiers(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats); return RichResult.Success(); } catch { }
-                }
-
-                foreach (var pname in new[] { "BaseValue", "CurrentValue", "Amount", "Value" })
-                {
-                    var setter = DuckovReflectionCache.GetSetter(stat.GetType(), pname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (setter != null) { setter(stat, value); _item.ReapplyModifiers(ownerItem); IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats); return RichResult.Success(); }
-                }
-
-                foreach (var fname in new[] { "BaseValue", "m_BaseValue", "_baseValue", "Value", "m_Value", "_value" })
-                {
-                    var f = DuckovReflectionCache.GetField(stat.GetType(), fname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (f == null || f.IsInitOnly) continue;
-                    try
-                    {
-                        object arg = value;
-                        try { arg = Convert.ChangeType(value, f.FieldType, CultureInfo.InvariantCulture); } catch { }
-                        f.SetValue(stat, arg);
-                        _item.ReapplyModifiers(ownerItem);
-                        IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats);
-                        return RichResult.Success();
-                    }
-                    catch { }
                 }
 
                 return RichResult.Fail(ErrorCode.NotSupported, "stat.BaseValue setter not found");
@@ -101,16 +232,9 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
                 if (string.IsNullOrEmpty(statKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "statKey null");
-                var stats = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var stats = GetStatsHost(ownerItem);
                 if (stats == null) return RichResult.Fail(ErrorCode.NotSupported, "no Stats on owner");
-                object stat = null;
-                var indexer = DuckovReflectionCache.GetMethod(stats.GetType(), "get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
-                if (indexer != null) { stat = indexer.Invoke(stats, new object[] { statKey }); }
-                if (stat == null)
-                {
-                    var getStat = DuckovReflectionCache.GetMethod(stats.GetType(), "GetStat", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
-                    if (getStat != null) stat = getStat.Invoke(stats, new object[] { statKey });
-                }
+                var stat = FindStatByKey(stats, statKey);
                 if (stat != null)
                 {
                     if (initialValue.HasValue)
@@ -121,7 +245,8 @@ namespace ItemModKit.Adapters.Duckov
                     return RichResult.Success();
                 }
 
-                var add = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var statsPlan = GetStatsCollectionPlan(stats.GetType());
+                var add = statsPlan.AddUntyped;
                 if (add == null || add.GetParameters().Length != 1)
                 {
                     var fallbackStatType = DuckovTypeUtils.FindType("ItemStatsSystem.Stats.Stat") ?? DuckovTypeUtils.FindType("Stat");
@@ -129,10 +254,10 @@ namespace ItemModKit.Adapters.Duckov
                     var ns = Activator.CreateInstance(fallbackStatType);
                     TryAssignStatKey(ns, statKey);
                     if (initialValue.HasValue) { TryAssignStatValue(ns, initialValue.Value); }
-                    var init0 = DuckovReflectionCache.GetMethod(fallbackStatType, "Initialize", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { stats.GetType() });
+                    var init0 = DuckovReflectionCache.GetMethod(fallbackStatType, "Initialize", InstanceFlags, new[] { stats.GetType() });
                     init0?.Invoke(ns, new[] { stats });
                     TryAssignStatKey(ns, statKey);
-                    var add0 = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { fallbackStatType });
+                    var add0 = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", InstanceFlags, new[] { fallbackStatType });
                     if (add0 == null) return RichResult.Fail(ErrorCode.NotSupported, "StatCollection.Add not found");
                     add0.Invoke(stats, new[] { ns });
                     TryAssignStatKey(ns, statKey);
@@ -145,12 +270,12 @@ namespace ItemModKit.Adapters.Duckov
                 var newStat = Activator.CreateInstance(statType);
                 TryAssignStatKey(newStat, statKey);
                 if (initialValue.HasValue) { TryAssignStatValue(newStat, initialValue.Value); }
-                var init = DuckovReflectionCache.GetMethod(statType, "Initialize", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { stats.GetType() })
-                           ?? DuckovReflectionCache.GetMethod(statType, "Initialize", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
-                           ?? DuckovReflectionCache.GetMethod(statType, "Initialize", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var init = DuckovReflectionCache.GetMethod(statType, "Initialize", InstanceFlags, new[] { stats.GetType() })
+                           ?? DuckovReflectionCache.GetMethod(statType, "Initialize", InstanceFlags, Type.EmptyTypes)
+                           ?? DuckovReflectionCache.GetMethod(statType, "Initialize", InstanceFlags);
                 init?.Invoke(newStat, init != null && init.GetParameters().Length == 0 ? null : new[] { stats });
                 TryAssignStatKey(newStat, statKey);
-                var addTyped = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { statType }) ?? add;
+                var addTyped = DuckovReflectionCache.GetMethod(stats.GetType(), "Add", InstanceFlags, new[] { statType }) ?? add;
                 addTyped.Invoke(stats, new[] { newStat });
                 TryAssignStatKey(newStat, statKey);
                 _item.ReapplyModifiers(ownerItem);
@@ -184,30 +309,7 @@ namespace ItemModKit.Adapters.Duckov
         {
             try
             {
-                var setVal = DuckovReflectionCache.GetSetter(stat.GetType(), "BaseValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (setVal != null) { setVal(stat, value); return; }
-                foreach (var mname in new[] { "SetBaseValue", "SetValue", "Set" })
-                {
-                    var m = DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(float) })
-                            ?? DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(double) })
-                            ?? DuckovReflectionCache.GetMethod(stat.GetType(), mname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (m == null) continue;
-                    var ps = m.GetParameters(); if (ps.Length != 1) continue;
-                    object arg = value; try { arg = Convert.ChangeType(value, ps[0].ParameterType, CultureInfo.InvariantCulture); } catch { }
-                    try { m.Invoke(stat, new[] { arg }); return; } catch { }
-                }
-                foreach (var pname in new[] { "BaseValue", "CurrentValue", "Amount", "Value" })
-                {
-                    var setter = DuckovReflectionCache.GetSetter(stat.GetType(), pname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (setter != null) { setter(stat, value); return; }
-                }
-                foreach (var fname in new[] { "BaseValue", "m_BaseValue", "_baseValue", "Value", "m_Value", "_value" })
-                {
-                    var f = DuckovReflectionCache.GetField(stat.GetType(), fname, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (f == null || f.IsInitOnly) continue;
-                    object arg = value; try { arg = Convert.ChangeType(value, f.FieldType, CultureInfo.InvariantCulture); } catch { }
-                    try { f.SetValue(stat, arg); return; } catch { }
-                }
+                TryWriteStatValueViaPlan(stat, value);
             }
             catch { }
         }
@@ -224,13 +326,13 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
                 if (string.IsNullOrEmpty(statKey)) return RichResult.Fail(ErrorCode.InvalidArgument, "statKey null");
-                var stats = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var stats = GetStatsHost(ownerItem);
                 if (stats == null) return RichResult.Fail(ErrorCode.NotSupported, "no Stats on owner");
-                var getStat = DuckovReflectionCache.GetMethod(stats.GetType(), "GetStat", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { typeof(string) });
-                if (getStat == null) return RichResult.Fail(ErrorCode.NotSupported, "GetStat not found");
-                var stat = getStat.Invoke(stats, new object[] { statKey });
+                var plan = GetStatsCollectionPlan(stats.GetType());
+                if (plan.GetByIndexer == null && plan.GetByKey == null) return RichResult.Fail(ErrorCode.NotSupported, "GetStat not found");
+                var stat = FindStatByKey(stats, statKey);
                 if (stat == null) return RichResult.Fail(ErrorCode.NotFound, "stat not found");
-                var remove = DuckovReflectionCache.GetMethod(stats.GetType(), "Remove", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, new[] { stat.GetType() });
+                var remove = DuckovReflectionCache.GetMethod(stats.GetType(), "Remove", InstanceFlags, new[] { stat.GetType() });
                 if (remove == null) return RichResult.Fail(ErrorCode.NotSupported, "StatCollection.Remove not found");
                 remove.Invoke(stats, new[] { stat });
                 _item.ReapplyModifiers(ownerItem);
@@ -253,11 +355,11 @@ namespace ItemModKit.Adapters.Duckov
             try
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
-                var stats = DuckovReflectionCache.GetGetter(ownerItem.GetType(), "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var stats = GetStatsHost(ownerItem);
                 if (stats == null) return RichResult.Fail(ErrorCode.NotSupported, "no Stats on owner");
 
-                var listField = DuckovReflectionCache.GetField(stats.GetType(), "list", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var list = listField?.GetValue(stats) as System.Collections.IList;
+                var plan = GetStatsCollectionPlan(stats.GetType());
+                var list = plan.BackingListField?.GetValue(stats) as System.Collections.IList;
                 if (list == null) return RichResult.Fail(ErrorCode.NotSupported, "Stats backing list not found");
                 if (fromIndex < 0 || fromIndex >= list.Count) return RichResult.Fail(ErrorCode.InvalidArgument, "fromIndex out of range");
                 if (toIndex < 0 || toIndex >= list.Count) return RichResult.Fail(ErrorCode.InvalidArgument, "toIndex out of range");
@@ -267,8 +369,7 @@ namespace ItemModKit.Adapters.Duckov
                 list.RemoveAt(fromIndex);
                 list.Insert(toIndex, entry);
 
-                var setDirty = DuckovReflectionCache.GetMethod(stats.GetType(), "SetDirty", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                setDirty?.Invoke(stats, null);
+                plan.SetDirty?.Invoke(stats, null);
                 IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats);
                 return RichResult.Success();
             }
@@ -291,15 +392,15 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
                 var ownerType = ownerItem.GetType();
-                var stats = DuckovReflectionCache.GetGetter(ownerType, "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var hostPlan = GetStatsHostPlan(ownerType);
+                var stats = hostPlan.StatsGetter?.Invoke(ownerItem);
                 if (stats != null) return RichResult.Success();
 
-                var create = DuckovReflectionCache.GetMethod(ownerType, "CreateStatsComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
-                             ?? DuckovReflectionCache.GetMethod(ownerType, "CreateStatsComponent", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var create = hostPlan.CreateStatsComponent;
                 if (create == null) return RichResult.Fail(ErrorCode.NotSupported, "CreateStatsComponent not found");
                 create.Invoke(ownerItem, null);
 
-                stats = DuckovReflectionCache.GetGetter(ownerType, "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                stats = hostPlan.StatsGetter?.Invoke(ownerItem);
                 if (stats == null) return RichResult.Fail(ErrorCode.OperationFailed, "stats host creation failed");
 
                 IMKDuckov.MarkDirty(ownerItem, DirtyKind.Stats);
@@ -324,21 +425,20 @@ namespace ItemModKit.Adapters.Duckov
             {
                 if (ownerItem == null) return RichResult.Fail(ErrorCode.InvalidArgument, "owner null");
                 var ownerType = ownerItem.GetType();
-                var stats = DuckovReflectionCache.GetGetter(ownerType, "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(ownerItem);
+                var hostPlan = GetStatsHostPlan(ownerType);
+                var stats = hostPlan.StatsGetter?.Invoke(ownerItem);
                 if (stats == null) return RichResult.Success();
 
-                var clear = DuckovReflectionCache.GetMethod(stats.GetType(), "Clear", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                clear?.Invoke(stats, null);
+                var plan = GetStatsCollectionPlan(stats.GetType());
+                plan.Clear?.Invoke(stats, null);
 
-                var statsField = DuckovReflectionCache.GetField(ownerType, "stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (statsField != null)
+                if (hostPlan.StatsField != null)
                 {
-                    statsField.SetValue(ownerItem, null);
+                    hostPlan.StatsField.SetValue(ownerItem, null);
                 }
                 else
                 {
-                    var setter = DuckovReflectionCache.GetSetter(ownerType, "Stats", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    setter?.Invoke(ownerItem, null);
+                    hostPlan.StatsSetter?.Invoke(ownerItem, null);
                 }
 
                 if (stats is Component component)

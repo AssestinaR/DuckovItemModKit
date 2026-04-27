@@ -17,6 +17,26 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed class DuckovRebirthService : IRebirthService
     {
+        private static void ReportRebirthDegraded(RestoreDiagnostics diagnostics, string action, Exception ex)
+        {
+            if (diagnostics != null)
+            {
+                diagnostics.Metadata[$"rebirth.degraded.{action}"] = ex.Message ?? ex.GetType().Name;
+            }
+
+            Log.Warn($"[IMK.Rebirth] degraded at {action}: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        private static void ReportRebirthRequestDegraded(RestoreRequest request, string action, Exception ex)
+        {
+            if (request != null)
+            {
+                request.DiagnosticsMetadata[$"rebirth.degraded.{action}"] = ex.Message ?? ex.GetType().Name;
+            }
+
+            Log.Warn($"[IMK.Rebirth] degraded at {action}: {ex.GetType().Name}: {ex.Message}");
+        }
+
         private sealed class RebirthExecutionResult : RestoreExecutionResultBase
         {
             public RebirthAbortOutcome AbortOutcome { get; set; }
@@ -83,7 +103,15 @@ namespace ItemModKit.Adapters.Duckov
 
                 DestroyOldItem(oldItem);
                 TryRefreshInventories();
-                try { IMKDuckov.MarkDirty(replace.RootItem, DirtyKind.Core | DirtyKind.Tags | DirtyKind.Variables, immediate: true); IMKDuckov.FlushDirty(replace.RootItem, force: true); } catch { }
+                try
+                {
+                    IMKDuckov.MarkDirty(replace.RootItem, DirtyKind.Core | DirtyKind.Tags | DirtyKind.Variables, immediate: true);
+                    IMKDuckov.FlushDirty(replace.RootItem, force: true);
+                }
+                catch (Exception ex)
+                {
+                    ReportRebirthDegraded(replace.Diagnostics, "final-flush", ex);
+                }
                 var successReport = CreateRebirthRestoreResult(replace, null);
                 IMKRebirthReports.Record(successReport);
                 return successReport;
@@ -157,7 +185,10 @@ namespace ItemModKit.Adapters.Duckov
                     _inv.Detach(oldItem);
                     detachedOldFromInventory = true;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    ReportRebirthRequestDegraded(request, "detach-old-inventory", ex);
+                }
             }
             else if (request.TargetMode == RestoreTargetMode.AttachToExplicitSlot)
             {
@@ -316,20 +347,20 @@ namespace ItemModKit.Adapters.Duckov
             return RebirthIntent.SafeReplace;
         }
 
-        private RebirthAbortOutcome AbortReplacement(object oldItem, object newItemObj, bool detachedOldFromInventory, object originalInventory, int originalInventoryIndex, bool detachedOldFromSlot, object originalSlotOwner, string originalSlotKey)
+        private RebirthAbortOutcome AbortReplacement(RebirthExecutionResult result, object oldItem, object newItemObj, bool detachedOldFromInventory, object originalInventory, int originalInventoryIndex, bool detachedOldFromSlot, object originalSlotOwner, string originalSlotKey)
         {
             DestroyItem(newItemObj);
 
             if (detachedOldFromInventory)
             {
-                var restored = TryRestoreOldInventoryPlacement(oldItem, originalInventory, originalInventoryIndex);
+                var restored = TryRestoreOldInventoryPlacement(result?.Diagnostics, oldItem, originalInventory, originalInventoryIndex);
                 TryRefreshInventories();
                 return restored;
             }
 
             if (detachedOldFromSlot)
             {
-                var restored = TryRestoreOldSlotPlacement(oldItem, originalSlotOwner, originalSlotKey);
+                var restored = TryRestoreOldSlotPlacement(result?.Diagnostics, oldItem, originalSlotOwner, originalSlotKey);
                 TryRefreshInventories();
                 return restored;
             }
@@ -338,7 +369,7 @@ namespace ItemModKit.Adapters.Duckov
             return RebirthAbortOutcome.OldTreeStillInPlace;
         }
 
-        private RebirthAbortOutcome TryRestoreOldInventoryPlacement(object oldItem, object inventory, int preferredInventoryIndex)
+        private RebirthAbortOutcome TryRestoreOldInventoryPlacement(RestoreDiagnostics diagnostics, object oldItem, object inventory, int preferredInventoryIndex)
         {
             if (oldItem == null) return RebirthAbortOutcome.None;
 
@@ -349,7 +380,7 @@ namespace ItemModKit.Adapters.Duckov
                     return RebirthAbortOutcome.RestoredInventoryIndex;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-restore-inventory-index", ex); }
 
             try
             {
@@ -358,17 +389,19 @@ namespace ItemModKit.Adapters.Duckov
                     return RebirthAbortOutcome.RestoredInventoryMerged;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-restore-inventory-merge", ex); }
 
-            try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; } catch { }
+            try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; }
+            catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-send-old-to-player", ex); }
             return RebirthAbortOutcome.None;
         }
 
-        private RebirthAbortOutcome TryRestoreOldSlotPlacement(object oldItem, object ownerItem, string slotKey)
+        private RebirthAbortOutcome TryRestoreOldSlotPlacement(RestoreDiagnostics diagnostics, object oldItem, object ownerItem, string slotKey)
         {
             if (oldItem == null || ownerItem == null || string.IsNullOrEmpty(slotKey))
             {
-                try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; } catch { }
+                try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; }
+                catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-slot-missing-send-old-to-player", ex); }
                 return RebirthAbortOutcome.None;
             }
 
@@ -380,9 +413,10 @@ namespace ItemModKit.Adapters.Duckov
                     return RebirthAbortOutcome.RestoredSlot;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-restore-slot", ex); }
 
-            try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; } catch { }
+            try { SendToPlayer(UnwrapToItem(oldItem)); return RebirthAbortOutcome.SentOldToPlayer; }
+            catch (Exception ex) { ReportRebirthDegraded(diagnostics, "rollback-restore-slot-send-old-to-player", ex); }
             return RebirthAbortOutcome.None;
         }
 
@@ -434,7 +468,7 @@ namespace ItemModKit.Adapters.Duckov
                     break;
 
                 case RebirthFailureAction.RollbackAndFail:
-                    result.AbortOutcome = AbortReplacement(oldItem, newItemObj, detachedOldFromInventory, originalInventory, originalInventoryIndex, detachedOldFromSlot, originalSlotOwner, originalSlotKey);
+                    result.AbortOutcome = AbortReplacement(result, oldItem, newItemObj, detachedOldFromInventory, originalInventory, originalInventoryIndex, detachedOldFromSlot, originalSlotOwner, originalSlotKey);
                     break;
 
                 case RebirthFailureAction.PreserveOldTreeAndFail:

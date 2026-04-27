@@ -1,4 +1,6 @@
-﻿using System.Reflection;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Reflection;
 using ItemModKit.Core;
 
 namespace ItemModKit.Adapters.Duckov
@@ -8,6 +10,15 @@ namespace ItemModKit.Adapters.Duckov
     /// </summary>
     internal sealed class DuckovUIRefreshService : IUIRefreshService
     {
+        private static readonly ConcurrentDictionary<string, byte> s_reportedUiRefreshFailures = new ConcurrentDictionary<string, byte>();
+
+        private static void ReportRefreshFailureOnce(string operation, Exception ex)
+        {
+            if (string.IsNullOrEmpty(operation) || ex == null) return;
+            if (!s_reportedUiRefreshFailures.TryAdd(operation, 0)) return;
+            Log.Warn($"[IMK.UIRefresh] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
+        }
+
         /// <summary>
         /// 刷新背包 UI。
         /// </summary>
@@ -24,13 +35,13 @@ namespace ItemModKit.Adapters.Duckov
                     p?.SetValue(inventory, true, null);
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportRefreshFailureOnce("RefreshInventory.markNeedInspection", ex); }
             try
             {
                 var m = inventory.GetType().GetMethod(EngineKeys.Method.Refresh, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 m?.Invoke(inventory, null);
             }
-            catch { }
+            catch (Exception ex) { ReportRefreshFailureOnce("RefreshInventory.invokeRefresh", ex); }
         }
     }
 }

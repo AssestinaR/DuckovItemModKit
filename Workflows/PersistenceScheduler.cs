@@ -75,6 +75,18 @@ namespace ItemModKit.Core
             _item = item; _persist = persist; _capture = capture;
         }
 
+        private static void LogWorkflowFailure(string operation, string phase, Exception ex, object item = null, DirtyKind dirty = DirtyKind.None)
+        {
+            var itemType = item?.GetType()?.FullName ?? "null";
+            Log.Error($"[IMK.Workflow] {operation} failed at {phase}; dirty={dirty}; itemType={itemType}", ex);
+        }
+
+        private static void LogWorkflowAuxFailure(string operation, string phase, Exception ex, object item = null, DirtyKind dirty = DirtyKind.None)
+        {
+            var itemType = item?.GetType()?.FullName ?? "null";
+            Log.Warn($"[IMK.Workflow] {operation} degraded at {phase}; dirty={dirty}; itemType={itemType}; {ex.GetType().Name}: {ex.Message}");
+        }
+
         /// <summary>
         /// 入队一个“脏”标记；若同一物品已在队列中则合并 DirtyKind 并刷新时间戳。
         /// </summary>
@@ -96,7 +108,7 @@ namespace ItemModKit.Core
                     if (immediate) e.Immediate = true;
                 }
             }
-            catch { }
+            catch (Exception ex) { LogWorkflowFailure("PersistenceScheduler.EnqueueDirty", "queue", ex, item, kind); }
         }
 
         /// <summary>立即刷新某个物品；如果目标不在队列中则直接忽略。</summary>
@@ -109,7 +121,7 @@ namespace ItemModKit.Core
                 if (!_entries.TryGetValue(id, out var e)) return;
                 InternalFlush(id, e, force);
             }
-            catch { }
+            catch (Exception ex) { LogWorkflowFailure("PersistenceScheduler.Flush", "dispatch", ex, item); }
         }
 
         /// <summary>立即刷新所有队列中的物品。</summary>
@@ -123,7 +135,7 @@ namespace ItemModKit.Core
                     if (_entries.TryGetValue(id, out var e)) InternalFlush(id, e, true);
                 }
             }
-            catch { }
+            catch (Exception ex) { LogWorkflowFailure("PersistenceScheduler.FlushAll", "dispatch-all", ex); }
         }
 
         /// <summary>
@@ -140,7 +152,7 @@ namespace ItemModKit.Core
                     if (_entries.TryGetValue(id, out var e)) e.Immediate = true;
                 }
             }
-            catch { }
+            catch (Exception ex) { LogWorkflowFailure("PersistenceScheduler.RequestFlushAllDeferred", "mark-immediate", ex); }
         }
 
         /// <summary>
@@ -168,7 +180,7 @@ namespace ItemModKit.Core
                 }
                 var t1 = UnityEngine.Time.realtimeSinceStartup; try { PerfCounters.SchedulerTicks++; PerfCounters.SchedulerTickTotalMs += (t1 - t0) * 1000.0; } catch { }
             }
-            catch { }
+            catch (Exception ex) { LogWorkflowFailure("PersistenceScheduler.Tick", "tick", ex); }
         }
 
         // 复用的 extra block 容器，降低高频刷新时的临时分配。
@@ -181,11 +193,14 @@ namespace ItemModKit.Core
         /// </summary>
         private void InternalFlush(int id, Entry e, bool force)
         {
+            var flushCompleted = false;
             try
             {
-                if (e == null || e.Item == null) { _entries.Remove(id); _flushOrder.Remove(id); return; }
+                if (e == null || e.Item == null) { flushCompleted = true; return; }
                 var snap = _capture(e.Item);
+                if (snap == null) throw new InvalidOperationException("snapshot capture returned null");
                 var meta = Persistence.BuildMetaFromSnapshot(snap);
+                if (meta == null) throw new InvalidOperationException("build meta returned null");
                 // metrics start
                 var tStart = UnityEngine.Time.realtimeSinceStartup;
                 meta.OwnerId = Adapters.Duckov.DuckovOwnership.CurrentOrInfer();
@@ -205,10 +220,12 @@ namespace ItemModKit.Core
                 if (wantExtra && e.Dirty.HasFlag(DirtyKind.Slots)) { s_extraReuse["slots"] = snap.Slots; }
                 if (wantExtra)
                 {
-                    try { ItemStateExtensions.Contribute(e.Item, snap, e.Dirty, s_extraReuse); } catch { }
+                    try { ItemStateExtensions.Contribute(e.Item, snap, e.Dirty, s_extraReuse); }
+                    catch (Exception ex) { LogWorkflowAuxFailure("PersistenceScheduler.InternalFlush", "contribute-extra", ex, e.Item, e.Dirty); }
                     if (s_extraReuse.Count > 0)
                     {
-                        try { ItemStateExtensions.Enrich(e.Item, meta, s_extraReuse); } catch { }
+                        try { ItemStateExtensions.Enrich(e.Item, meta, s_extraReuse); }
+                        catch (Exception ex) { LogWorkflowAuxFailure("PersistenceScheduler.InternalFlush", "enrich-extra", ex, e.Item, e.Dirty); }
                     }
                 }
                 // embed only if requested
@@ -230,13 +247,14 @@ namespace ItemModKit.Core
                         }
                         else { meta.EmbeddedJson = null; meta.ExtraChecksum = null; }
                     }
-                    catch { meta.EmbeddedJson = null; meta.ExtraChecksum = null; }
+                    catch (Exception ex) { meta.EmbeddedJson = null; meta.ExtraChecksum = null; LogWorkflowAuxFailure("PersistenceScheduler.InternalFlush", "embed-extra", ex, e.Item, e.Dirty); }
                 }
                 // write meta
                 _persist.RecordMeta(e.Item, meta, writeVariables: PersistenceSettings.Current.WriteRedundantVariables);
                 if (PersistenceSettings.Current.ReapplyAfterWrite)
                 {
-                    try { _item.ReapplyModifiers(e.Item); } catch { }
+                    try { _item.ReapplyModifiers(e.Item); }
+                    catch (Exception ex) { LogWorkflowAuxFailure("PersistenceScheduler.InternalFlush", "reapply-modifiers", ex, e.Item, e.Dirty); }
                 }
                 var tEnd = UnityEngine.Time.realtimeSinceStartup;
                 try { PerfCounters.SchedulerFlushTotalMs += (tEnd - tStart) * 1000.0; } catch { }
@@ -253,15 +271,29 @@ namespace ItemModKit.Core
                         Core.Log.Info($"[IMK.Flush.Item] {msItem:0.0}ms type={typeId} name={name ?? "?"} dirty={e.Dirty} jsonBytes={jsonBytes} extraKeys={extraKeys}");
                     }
                 }
-                catch { }
+                catch (Exception ex) { LogWorkflowAuxFailure("PersistenceScheduler.InternalFlush", "slow-item-diagnostics", ex, e.Item, e.Dirty); }
+
+                flushCompleted = true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogWorkflowFailure("PersistenceScheduler.InternalFlush", "core-flush", ex, e?.Item, e?.Dirty ?? DirtyKind.None);
+                if (e != null)
+                {
+                    e.Immediate = true;
+                    e.LastDirtyAt = Now();
+                    if (e.FirstDirtyAt <= 0f) e.FirstDirtyAt = e.LastDirtyAt;
+                }
+            }
             finally
             {
                 try { PerfCounters.SchedulerFlushes++; } catch { }
-                try { _processedTotal++; } catch { }
-                _entries.Remove(id);
-                _flushOrder.Remove(id);
+                if (flushCompleted)
+                {
+                    try { _processedTotal++; } catch { }
+                    _entries.Remove(id);
+                    _flushOrder.Remove(id);
+                }
             }
         }
 

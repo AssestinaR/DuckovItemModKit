@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Concurrent;
+using ItemModKit.Core;
 using static ItemModKit.Adapters.Duckov.DuckovTypeUtils;
 
 namespace ItemModKit.Adapters.Duckov
@@ -6,6 +9,14 @@ namespace ItemModKit.Adapters.Duckov
     {
         private static System.WeakReference s_detailsRef;
         private static System.WeakReference s_menuRef;
+        private static readonly ConcurrentDictionary<string, byte> s_reportedSelectionFailures = new ConcurrentDictionary<string, byte>();
+
+        private static void ReportSelectionFailureOnce(string operation, Exception ex)
+        {
+            if (string.IsNullOrEmpty(operation) || ex == null) return;
+            if (!s_reportedSelectionFailures.TryAdd(operation, 0)) return;
+            Log.Warn($"[IMK.UISelection] {operation} degraded: {ex.GetType().Name}: {ex.Message}");
+        }
 
         public static bool TryGetDetailsItem(out object item)
         {
@@ -21,7 +32,7 @@ namespace ItemModKit.Adapters.Duckov
                 item = p.GetValue(inst, null);
                 return item != null;
             }
-            catch { return false; }
+            catch (Exception ex) { ReportSelectionFailureOnce("TryGetDetailsItem", ex); return false; }
         }
 
         public static bool TryGetOperationMenuItem(out object item)
@@ -49,7 +60,7 @@ namespace ItemModKit.Adapters.Duckov
                     return item != null;
                 }
             }
-            catch { }
+            catch (Exception ex) { ReportSelectionFailureOnce("TryGetOperationMenuItem", ex); }
             return false;
         }
 
@@ -70,7 +81,7 @@ namespace ItemModKit.Adapters.Duckov
                 s_detailsRef = new System.WeakReference(inst);
                 return inst;
             }
-            catch { return null; }
+            catch (Exception ex) { ReportSelectionFailureOnce("GetDetailsInstance", ex); return null; }
         }
 
         private static object GetOperationMenuInstance()
@@ -84,7 +95,7 @@ namespace ItemModKit.Adapters.Duckov
                 s_menuRef = new System.WeakReference(inst);
                 return inst;
             }
-            catch { return null; }
+            catch (Exception ex) { ReportSelectionFailureOnce("GetOperationMenuInstance", ex); return null; }
         }
 
         private static bool IsActive(object comp)
@@ -98,7 +109,7 @@ namespace ItemModKit.Adapters.Duckov
                 var en = cT.GetProperty("enabled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
                 if (en != null) { var v = en.GetValue(comp, null); if (v is bool b) return b; }
             }
-            catch { }
+            catch (Exception ex) { ReportSelectionFailureOnce("IsActive", ex); }
             return true;
         }
     }
